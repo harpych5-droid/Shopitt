@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView, Animated,
-  Dimensions, KeyboardAvoidingView, Platform, TextInput,
+  Dimensions, KeyboardAvoidingView, Platform, TextInput, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,26 +10,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
+import { OrderService } from '@/services/orderService';
+import { AddressService } from '@/services/addressService';
+import { NotificationService } from '@/services/notificationService';
 import { CountryPicker } from '@/components/ui/CountryPicker';
+import type { DeliveryAddress } from '@/lib/types';
 
 const { width } = Dimensions.get('window');
 
-interface AddressData {
-  fullName: string;
-  phone: string;
-  country: string;
-  city: string;
-  address: string;
-  notes: string;
-}
+const EMPTY_ADDRESS: DeliveryAddress = { fullName: '', phone: '', country: '', city: '', address: '', notes: '' };
 
-const EMPTY_ADDRESS: AddressData = { fullName: '', phone: '', country: '', city: '', address: '', notes: '' };
-
-function AddressForm({ initial, onSave, onCancel }: { initial: AddressData; onSave: (data: AddressData) => void; onCancel: () => void }) {
-  const [form, setForm] = useState<AddressData>(initial);
-  const update = (k: keyof AddressData) => (v: string) => setForm(p => ({ ...p, [k]: v }));
+function AddressForm({ initial, onSave, onCancel }: { initial: DeliveryAddress; onSave: (data: DeliveryAddress) => void; onCancel: () => void }) {
+  const [form, setForm] = useState<DeliveryAddress>(initial);
+  const update = (k: keyof DeliveryAddress) => (v: string) => setForm(p => ({ ...p, [k]: v }));
   const isValid = form.fullName.trim() && form.phone.trim() && form.country && form.city.trim() && form.address.trim();
-
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
       <ScrollView style={styles.addressScroll} contentContainerStyle={styles.addressContent} keyboardShouldPersistTaps="handled">
@@ -45,7 +39,7 @@ function AddressForm({ initial, onSave, onCancel }: { initial: AddressData; onSa
         </View>
         <FieldInput label="City / District" placeholder="e.g. Lusaka" value={form.city} onChangeText={update('city')} />
         <FieldInput label="Street Address" placeholder="e.g. 14 Cairo Road, Flat 3B" value={form.address} onChangeText={update('address')} />
-        <FieldInput label="Delivery Notes (Optional)" placeholder="e.g. Call before arrival" value={form.notes} onChangeText={update('notes')} multiline />
+        <FieldInput label="Delivery Notes (Optional)" placeholder="e.g. Call before arrival" value={form.notes ?? ''} onChangeText={update('notes')} multiline />
         <View style={styles.addressBtns}>
           <Pressable onPress={onCancel} style={styles.cancelBtn}>
             <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -88,13 +82,20 @@ const ORDER_STEPS = [
   { key: 'delivered', label: 'Delivered', icon: 'home', done: false },
 ];
 
+const PAY_METHODS = [
+  { id: 'mobilemoney', label: 'Mobile Money', icon: 'phone-portrait-outline', sub: 'MTN, Airtel, Zamtel' },
+  { id: 'card', label: 'Card Payment', icon: 'card-outline', sub: 'Visa, Mastercard' },
+  { id: 'delivery', label: 'Cash on Delivery', icon: 'car-outline', sub: 'Pay when you receive' },
+];
+
 export default function BagScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, currency } = useApp();
+  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, currency, authUser, user } = useApp();
   const sym = currency.symbol;
 
-  const [savedAddress, setSavedAddress] = useState<AddressData | null>(null);
+  const [savedAddress, setSavedAddress] = useState<DeliveryAddress | null>(null);
+  const [addressLoading, setAddressLoading] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'address' | 'payment'>('address');
   const [payMethod, setPayMethod] = useState<'mobilemoney' | 'card' | 'delivery'>('mobilemoney');
@@ -102,6 +103,28 @@ export default function BagScreen() {
   const [placing, setPlacing] = useState(false);
   const checkoutY = useRef(new Animated.Value(600)).current;
   const successScale = useRef(new Animated.Value(0)).current;
+
+  // Load saved address from Supabase
+  useEffect(() => {
+    if (authUser) loadSavedAddress();
+  }, [authUser]);
+
+  const loadSavedAddress = async () => {
+    if (!authUser) return;
+    setAddressLoading(true);
+    const addr = await AddressService.getDefaultAddress(authUser.id);
+    if (addr) {
+      setSavedAddress({
+        fullName: addr.full_name,
+        phone: addr.phone,
+        country: addr.country,
+        city: addr.city,
+        address: addr.address,
+        notes: addr.notes ?? '',
+      });
+    }
+    setAddressLoading(false);
+  };
 
   const openCheckout = () => {
     setShowCheckout(true);
@@ -113,35 +136,82 @@ export default function BagScreen() {
     Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => setShowCheckout(false));
   };
 
-  const handleSaveAddress = (data: AddressData) => {
+  const handleSaveAddress = async (data: DeliveryAddress) => {
     setSavedAddress(data);
+    // Persist to Supabase
+    if (authUser) {
+      await AddressService.saveAddress({
+        user_id: authUser.id,
+        full_name: data.fullName,
+        phone: data.phone,
+        country: data.country,
+        city: data.city,
+        address: data.address,
+        notes: data.notes ?? null,
+        is_default: true,
+      });
+    }
     setCheckoutStep('payment');
   };
 
-  const placeOrder = () => {
+  const placeOrder = async () => {
     if (!savedAddress) return;
     setPlacing(true);
-    // Insert payment gateway API here
-    setTimeout(() => {
-      setPlacing(false);
-      Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start();
-      setSuccess(true);
-      Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
-      setTimeout(() => {
-        clearBag();
-        setSuccess(false);
-        successScale.setValue(0);
-        setShowCheckout(false);
-        router.push('/(tabs)');
-      }, 3000);
-    }, 1200);
-  };
 
-  const PAY_METHODS = [
-    { id: 'mobilemoney', label: 'Mobile Money', icon: 'phone-portrait-outline', sub: 'MTN, Airtel, Zamtel' },
-    { id: 'card', label: 'Card Payment', icon: 'card-outline', sub: 'Visa, Mastercard' },
-    { id: 'delivery', label: 'Cash on Delivery', icon: 'car-outline', sub: 'Pay when you receive' },
-  ];
+    if (authUser && bagItems.length > 0) {
+      const firstItem = bagItems[0];
+      const sellerId = firstItem.sellerId || authUser.id; // fallback for demo
+
+      await OrderService.createOrder({
+        buyer_id: authUser.id,
+        seller_id: sellerId,
+        post_id: firstItem.postId || null,
+        items: bagItems.map(item => ({
+          post_id: item.postId,
+          seller_id: item.sellerId,
+          product: item.product,
+          price: item.price,
+          price_num: item.priceNum,
+          quantity: item.quantity,
+          image: item.image,
+          currency: item.currency,
+        })),
+        delivery_address: savedAddress,
+        payment_method: payMethod,
+        subtotal: bagTotal,
+        total: bagTotal,
+        currency: currency.code,
+        delivery_type: 'country',
+      });
+
+      // Notify seller
+      if (sellerId !== authUser.id) {
+        await NotificationService.create({
+          user_id: sellerId,
+          type: 'order',
+          title: 'New Order Received!',
+          body: `${user?.username ?? 'Someone'} ordered ${firstItem.product}`,
+          related_id: firstItem.postId ?? undefined,
+          related_type: 'order',
+          read: false,
+          avatar_url: user?.avatar_url ?? null,
+        });
+      }
+    }
+
+    // Insert payment gateway API here
+    setPlacing(false);
+    Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start();
+    setSuccess(true);
+    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+    setTimeout(() => {
+      clearBag();
+      setSuccess(false);
+      successScale.setValue(0);
+      setShowCheckout(false);
+      router.push('/(tabs)');
+    }, 3000);
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -304,7 +374,10 @@ export default function BagScreen() {
 
               <Pressable onPress={placeOrder} disabled={placing}>
                 <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.placeOrderBtn, Shadow.glow]}>
-                  <Text style={styles.placeOrderText}>{placing ? 'Placing...' : `Place Order — ${sym}${bagTotal.toLocaleString()}`}</Text>
+                  {placing
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={styles.placeOrderText}>Place Order — {sym}{bagTotal.toLocaleString()}</Text>
+                  }
                 </LinearGradient>
               </Pressable>
               <View style={{ height: 32 }} />
@@ -329,7 +402,7 @@ export default function BagScreen() {
                 </Text>
               </View>
             )}
-            {ORDER_STEPS.map((step) => (
+            {ORDER_STEPS.map(step => (
               <View key={step.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' }}>
                 <View style={[styles.tDot, step.done && styles.tDotDone]}>
                   <Ionicons name={step.icon as any} size={13} color={step.done ? '#fff' : Colors.textMuted} />

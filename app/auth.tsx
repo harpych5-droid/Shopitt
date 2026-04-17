@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, Animated,
   Dimensions, KeyboardAvoidingView, Platform, TextInput, ScrollView,
@@ -12,11 +12,11 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 export default function AuthScreen() {
   const router = useRouter();
-  const { signInWithGoogle, signInWithEmail, signUpWithEmail, isLoggedIn } = useApp();
+  const { signInWithGoogle, signInWithEmail, signUpWithEmail, isLoggedIn, authLoading } = useApp();
   const insets = useSafeAreaInsets();
   const logoScale = useRef(new Animated.Value(0.8)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -31,22 +31,19 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Redirect if already logged in
   useEffect(() => {
-    if (isLoggedIn) router.replace('/(tabs)');
-  }, [isLoggedIn]);
+    if (!authLoading && isLoggedIn) router.replace('/(tabs)');
+  }, [isLoggedIn, authLoading]);
 
   useEffect(() => {
     Animated.parallel([
       Animated.spring(logoScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 200 }),
       Animated.timing(logoOpacity, { toValue: 1, duration: 600, useNativeDriver: true, delay: 200 }),
     ]).start();
-
     Animated.parallel([
       Animated.timing(btnsOpacity, { toValue: 1, duration: 600, useNativeDriver: true, delay: 700 }),
       Animated.timing(btnsTranslate, { toValue: 0, duration: 600, useNativeDriver: true, delay: 700 }),
     ]).start();
-
     Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, { toValue: 0.8, duration: 2000, useNativeDriver: true }),
@@ -61,7 +58,6 @@ export default function AuthScreen() {
     const { error: e } = await signInWithGoogle();
     setLoading(false);
     if (e) setError(e);
-    // Auth state change will redirect automatically
   };
 
   const handleEmailSignIn = async () => {
@@ -75,26 +71,32 @@ export default function AuthScreen() {
   };
 
   const handleEmailSignUp = async () => {
-    if (!email.trim() || !password.trim() || !username.trim()) {
-      setError('All fields required');
-      return;
-    }
+    if (!email.trim() || !password.trim() || !username.trim()) { setError('All fields required'); return; }
     if (password.length < 6) { setError('Password must be at least 6 characters'); return; }
     setLoading(true);
     setError('');
     const { error: e } = await signUpWithEmail(email.trim(), password, username.trim());
     setLoading(false);
     if (e) setError(e);
-    else router.replace('/(tabs)');
+    else {
+      setError('');
+      setMode('signin');
+      setEmail(email.trim());
+      setPassword('');
+    }
   };
+
+  if (authLoading) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator color={Colors.pink} size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Image
-        source={require('@/assets/images/auth-bg.png')}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-      />
+      <Image source={require('@/assets/images/auth-bg.png')} style={StyleSheet.absoluteFill} contentFit="cover" />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(14,14,14,0.72)' }]} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -102,7 +104,6 @@ export default function AuthScreen() {
           contentContainerStyle={[styles.inner, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 }]}
           keyboardShouldPersistTaps="handled"
         >
-          {/* LOGO + MASCOT */}
           <Animated.View style={[styles.logoWrap, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}>
             <Animated.View style={[styles.glowRing, { opacity: glowAnim }]} />
             <Image
@@ -110,21 +111,13 @@ export default function AuthScreen() {
               style={styles.mascot}
               contentFit="contain"
             />
-            <LinearGradient
-              colors={Gradients.primary}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={[styles.logoBadge, Shadow.glow]}
-            >
+            <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.logoBadge, Shadow.glow]}>
               <Text style={styles.logoText}>Shopitt</Text>
             </LinearGradient>
             <Text style={styles.tagline}>Discover. Share. Buy. Instantly.</Text>
           </Animated.View>
 
-          {/* BUTTONS */}
           <Animated.View style={[styles.btns, { opacity: btnsOpacity, transform: [{ translateY: btnsTranslate }] }]}>
-
-            {/* Error */}
             {error ? (
               <View style={styles.errorBox}>
                 <Ionicons name="alert-circle-outline" size={16} color={Colors.error} />
@@ -134,12 +127,7 @@ export default function AuthScreen() {
 
             {mode === 'options' && (
               <>
-                <SocialButton
-                  icon="logo-google"
-                  label="Continue with Google"
-                  onPress={handleGoogle}
-                  loading={loading}
-                />
+                <SocialButton icon="logo-google" label="Continue with Google" onPress={handleGoogle} loading={loading} />
                 <View style={styles.dividerRow}>
                   <View style={styles.divider} />
                   <Text style={styles.dividerText}>or</Text>
@@ -157,26 +145,10 @@ export default function AuthScreen() {
             {mode === 'signin' && (
               <View style={styles.form}>
                 <Text style={styles.formTitle}>Sign In</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email address"
-                  placeholderTextColor={Colors.textMuted}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password"
-                  placeholderTextColor={Colors.textMuted}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                />
+                <TextInput style={styles.input} placeholder="Email address" placeholderTextColor={Colors.textMuted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                <TextInput style={styles.input} placeholder="Password" placeholderTextColor={Colors.textMuted} value={password} onChangeText={setPassword} secureTextEntry />
                 <Pressable onPress={handleEmailSignIn} disabled={loading} style={{ width: '100%' }}>
-                  <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                    style={styles.submitBtn}>
+                  <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.submitBtn}>
                     {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Sign In</Text>}
                   </LinearGradient>
                 </Pressable>
@@ -192,34 +164,11 @@ export default function AuthScreen() {
             {mode === 'signup' && (
               <View style={styles.form}>
                 <Text style={styles.formTitle}>Create Account</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Username (e.g. joy_street)"
-                  placeholderTextColor={Colors.textMuted}
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email address"
-                  placeholderTextColor={Colors.textMuted}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password (min 6 chars)"
-                  placeholderTextColor={Colors.textMuted}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry
-                />
+                <TextInput style={styles.input} placeholder="Username (e.g. joy_street)" placeholderTextColor={Colors.textMuted} value={username} onChangeText={setUsername} autoCapitalize="none" />
+                <TextInput style={styles.input} placeholder="Email address" placeholderTextColor={Colors.textMuted} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                <TextInput style={styles.input} placeholder="Password (min 6 chars)" placeholderTextColor={Colors.textMuted} value={password} onChangeText={setPassword} secureTextEntry />
                 <Pressable onPress={handleEmailSignUp} disabled={loading} style={{ width: '100%' }}>
-                  <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                    style={styles.submitBtn}>
+                  <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.submitBtn}>
                     {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Create Account</Text>}
                   </LinearGradient>
                 </Pressable>
@@ -234,7 +183,7 @@ export default function AuthScreen() {
           </Animated.View>
 
           <Text style={styles.terms}>
-            By continuing, you agree to our{' '}
+            By continuing you agree to our{' '}
             <Text style={{ color: Colors.pink }}>Terms</Text>
             {' & '}
             <Text style={{ color: Colors.pink }}>Privacy Policy</Text>
@@ -259,10 +208,10 @@ function SocialButton({ icon, label, onPress, loading }: any) {
         {loading
           ? <ActivityIndicator color="#fff" size="small" />
           : <>
-            <Ionicons name={icon} size={22} color="#fff" />
-            <Text style={styles.socialBtnText}>{label}</Text>
-            <View style={{ width: 22 }} />
-          </>
+              <Ionicons name={icon} size={22} color="#fff" />
+              <Text style={styles.socialBtnText}>{label}</Text>
+              <View style={{ width: 22 }} />
+            </>
         }
       </Pressable>
     </Animated.View>
@@ -283,14 +232,12 @@ const styles = StyleSheet.create({
   logoText: { color: '#fff', fontSize: 36, fontWeight: Typography.black, letterSpacing: 1 },
   tagline: { color: Colors.textSecondary, fontSize: Typography.base, letterSpacing: 0.5, textAlign: 'center' },
   btns: { width: '100%', alignItems: 'center', gap: 12 },
-
   errorBox: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     backgroundColor: 'rgba(255,59,48,0.1)', borderRadius: Radius.md, padding: 12, width: '100%',
     borderWidth: 1, borderColor: 'rgba(255,59,48,0.3)',
   },
   errorText: { color: Colors.error, fontSize: Typography.sm, flex: 1 },
-
   socialBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: Radius.pill,
@@ -298,11 +245,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24, paddingVertical: 16, width: '100%', minHeight: 54,
   },
   socialBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold, flex: 1, textAlign: 'center' },
-
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%' },
   divider: { flex: 1, height: 1, backgroundColor: Colors.border },
   dividerText: { color: Colors.textMuted, fontSize: Typography.sm },
-
   emailLink: {
     width: '100%', backgroundColor: Colors.surface, borderRadius: Radius.pill,
     borderWidth: 1, borderColor: Colors.border, paddingVertical: 15, alignItems: 'center',
@@ -310,7 +255,6 @@ const styles = StyleSheet.create({
   emailLinkText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold },
   signupLink: { paddingVertical: 8 },
   signupLinkText: { color: Colors.textSecondary, fontSize: Typography.base, textDecorationLine: 'underline' },
-
   form: { width: '100%', gap: 12 },
   formTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.bold, marginBottom: 4 },
   input: {
@@ -322,6 +266,5 @@ const styles = StyleSheet.create({
   backLink: { alignItems: 'center', paddingVertical: 6 },
   backText: { color: Colors.textSecondary, fontSize: Typography.base },
   switchText: { color: Colors.textMuted, fontSize: Typography.sm, textAlign: 'center' },
-
   terms: { color: Colors.textMuted, fontSize: Typography.sm, textAlign: 'center', marginTop: 32, lineHeight: 20 },
 });

@@ -11,6 +11,8 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { TRENDING_TAGS, SEARCH_CATEGORIES, FEATURED_SELLERS, FEED_POSTS } from '@/constants/data';
 import { useApp } from '@/contexts/AppContext';
+import { PostService } from '@/services/postService';
+import { ProfileService } from '@/services/profileService';
 
 const { width } = Dimensions.get('window');
 const RESULT_IMG = (width - 48) / 2;
@@ -33,18 +35,37 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [sellers, setSellers] = useState<any[]>(FEATURED_SELLERS);
+  const [searching, setSearching] = useState(false);
+
+  // Load featured sellers from Supabase
+  useEffect(() => {
+    ProfileService.getFeaturedSellers(10).then(({ data }) => {
+      if (data.length > 0) setSellers(data.map(s => ({ id: s.id, username: s.username, avatar: s.avatar_url, verified: s.verified })));
+    });
+  }, []);
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return; }
-    const timer = setTimeout(() => {
-      const q = query.toLowerCase();
-      const filtered = (FEED_POSTS as any[]).filter((p: any) =>
-        (p.seller || '').toLowerCase().includes(q) ||
-        (p.caption || '').toLowerCase().includes(q) ||
-        (p.category || '').toLowerCase().includes(q) ||
-        (p.hashtags || []).some((h: string) => h.toLowerCase().includes(q))
-      );
-      setResults(filtered);
+    const timer = setTimeout(async () => {
+      setSearching(true);
+
+      // Search Supabase posts + fallback to mock
+      const { data, error } = await PostService.search(query);
+      if (!error && data.length > 0) {
+        setResults(data);
+      } else {
+        // Fallback to local mock search
+        const q = query.toLowerCase();
+        const filtered = (FEED_POSTS as any[]).filter((p: any) =>
+          (p.seller || '').toLowerCase().includes(q) ||
+          (p.caption || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q) ||
+          (p.hashtags || []).some((h: string) => h.toLowerCase().includes(q))
+        );
+        setResults(filtered);
+      }
+      setSearching(false);
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
@@ -109,10 +130,18 @@ export default function SearchScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Featured Sellers</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-                {FEATURED_SELLERS.map(s => (
+                {sellers.map(s => (
                   <Pressable key={s.id} style={styles.sellerChip} onPress={() => router.push('/(tabs)/profile')}>
                     <View style={styles.sellerAvatarWrap}>
-                      <Image source={{ uri: s.avatar }} style={styles.sellerAvatar} contentFit="cover" />
+                      {s.avatar || s.avatar_url ? (
+                        <Image source={{ uri: s.avatar || s.avatar_url }} style={styles.sellerAvatar} contentFit="cover" />
+                      ) : (
+                        <LinearGradient colors={Gradients.primary} style={styles.sellerAvatar}>
+                          <Text style={{ color: '#fff', fontWeight: Typography.bold }}>
+                            {(s.username || 'U').charAt(0).toUpperCase()}
+                          </Text>
+                        </LinearGradient>
+                      )}
                       {s.verified && <MaterialIcons name="verified" size={14} color={Colors.verified} style={styles.verifiedIcon} />}
                     </View>
                     <Text style={styles.sellerChipName} numberOfLines={1}>@{s.username}</Text>
@@ -124,10 +153,10 @@ export default function SearchScreen() {
         ) : (
           <View style={styles.results}>
             <Text style={styles.resultsCount}>
-              {results.length} {results.length === 1 ? 'result' : 'results'} for "{query}"
+              {searching ? 'Searching...' : `${results.length} ${results.length === 1 ? 'result' : 'results'} for "${query}"`}
             </Text>
 
-            {results.length === 0 ? (
+            {results.length === 0 && !searching ? (
               <View style={styles.noResults}>
                 <Text style={styles.noResultsEmoji}>🔍</Text>
                 <Text style={styles.noResultsText}>No results found</Text>
@@ -140,8 +169,8 @@ export default function SearchScreen() {
                     onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}>
                     <Image source={{ uri: item.image || item.media_urls?.[0] }} style={styles.resultImg} contentFit="cover" />
                     <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.resultGrad}>
-                      <Text style={styles.resultPrice}>{item.price || `${sym}${item.price_num || ''}`}</Text>
-                      <Text style={styles.resultSeller} numberOfLines={1}>@{item.seller}</Text>
+                      <Text style={styles.resultPrice}>{item.price || item.price_text || `${sym}${item.price_num || ''}`}</Text>
+                      <Text style={styles.resultSeller} numberOfLines={1}>@{item.seller || item.user_profiles?.username || 'seller'}</Text>
                     </LinearGradient>
                   </Pressable>
                 ))}
@@ -182,7 +211,7 @@ const styles = StyleSheet.create({
   catLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: Typography.medium, textAlign: 'center' },
   sellerChip: { alignItems: 'center', gap: 6, width: 80 },
   sellerAvatarWrap: { position: 'relative' },
-  sellerAvatar: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: Colors.pink },
+  sellerAvatar: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: Colors.pink, alignItems: 'center', justifyContent: 'center' },
   verifiedIcon: { position: 'absolute', bottom: 0, right: 0 },
   sellerChipName: { color: Colors.textSecondary, fontSize: Typography.xs, textAlign: 'center' },
   results: { padding: 16, gap: 12 },

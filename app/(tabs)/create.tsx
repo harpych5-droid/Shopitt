@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView,
-  TextInput, KeyboardAvoidingView, Platform, Alert,
+  TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,6 +12,8 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { useApp } from '@/contexts/AppContext';
+import { PostService } from '@/services/postService';
+import { MediaService } from '@/services/mediaService';
 
 type PostType = null | 'product' | 'video' | 'service';
 type DeliveryType = 'local' | 'country' | 'international';
@@ -26,7 +28,7 @@ const DELIVERY_INFO = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isLoggedIn, currency } = useApp();
+  const { isLoggedIn, currency, authUser, user } = useApp();
 
   const [postType, setPostType] = useState<PostType>(null);
   const [mediaFiles, setMediaFiles] = useState<Array<{ uri: string; type: 'image' | 'video' }>>([]);
@@ -39,6 +41,7 @@ export default function CreateScreen() {
   const [delivery, setDelivery] = useState<DeliveryType>('country');
   const [courier, setCourier] = useState<CourierType>('self');
   const [serviceTitle, setServiceTitle] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const sym = currency.symbol;
@@ -70,19 +73,69 @@ export default function CreateScreen() {
     setMediaFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (!canPost) return;
-    if (!isLoggedIn) {
+    if (!isLoggedIn || !authUser) {
       router.push('/auth');
       return;
     }
+
+    setUploading(true);
+
+    // Upload media to Cloudinary
+    let mediaUrls: string[] = [];
+    if (mediaFiles.length > 0) {
+      const { urls, errors } = await MediaService.uploadMultiple(mediaFiles);
+      if (errors.length > 0 && urls.length === 0) {
+        Alert.alert('Upload Error', errors[0]);
+        setUploading(false);
+        return;
+      }
+      mediaUrls = urls;
+    }
+
+    // Parse hashtags
+    const hashtagList = hashtags
+      .split(/[\s,]+/)
+      .map(h => h.trim().startsWith('#') ? h.trim() : `#${h.trim()}`)
+      .filter(h => h.length > 1);
+
+    // Build post object
+    const priceNum = parseFloat(price.replace(/[^0-9.]/g, '')) || 0;
+    const post: any = {
+      user_id: authUser.id,
+      post_type: postType,
+      drop_title: postType === 'service' ? serviceTitle.trim() : dropTitle.trim(),
+      description: description.trim(),
+      price_text: postType === 'product' ? `${sym}${priceNum.toLocaleString()}` : null,
+      price_num: priceNum,
+      currency: currency.code,
+      quantity: postType === 'product' ? parseInt(quantity) || 1 : 1,
+      category: category || null,
+      hashtags: hashtagList,
+      media_urls: mediaUrls,
+      delivery_type: delivery,
+      courier_type: courier,
+      free_delivery: true,
+      is_active: true,
+    };
+
+    const { data, error } = await PostService.createPost(post);
+
+    setUploading(false);
+
+    if (error) {
+      Alert.alert('Error', error);
+      return;
+    }
+
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);
       setPostType(null);
       setDropTitle(''); setDescription(''); setPrice('');
       setQuantity(''); setCategory(''); setHashtags('');
-      setMediaFiles([]);
+      setServiceTitle(''); setMediaFiles([]);
       router.push('/(tabs)');
     }, 1200);
   };
@@ -101,13 +154,16 @@ export default function CreateScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>Create Post</Text>
         {postType ? (
-          <Pressable onPress={handlePost} disabled={!canPost || submitted}>
+          <Pressable onPress={handlePost} disabled={!canPost || uploading || submitted}>
             <LinearGradient
               colors={canPost ? Gradients.primary : ['#333', '#444']}
               start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
               style={styles.postBtn}
             >
-              <Text style={styles.postBtnText}>{submitted ? 'Posted! ✓' : 'Post'}</Text>
+              {uploading
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.postBtnText}>{submitted ? 'Posted! ✓' : 'Post'}</Text>
+              }
             </LinearGradient>
           </Pressable>
         ) : <View style={{ width: 50 }} />}
@@ -325,7 +381,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   headerTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.semibold },
-  postBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.pill, minWidth: 60, alignItems: 'center' },
+  postBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.pill, minWidth: 60, alignItems: 'center', justifyContent: 'center' },
   postBtnText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
   typeSheet: { flex: 1, paddingHorizontal: 20, paddingTop: 32 },
   sheetHandle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },

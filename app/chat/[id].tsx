@@ -1,52 +1,111 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, TextInput,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
+import { useApp } from '@/contexts/AppContext';
+import { ChatService } from '@/services/chatService';
+import type { DBMessage } from '@/lib/types';
 
-interface Message {
-  id: string;
-  senderId: string;
-  text: string;
-  createdAt: string;
-}
-
-const MOCK_MSGS: Message[] = [
-  { id: 'm1', senderId: 'other', text: 'Hey! Is this still available?', createdAt: new Date(Date.now() - 120000).toISOString() },
-  { id: 'm2', senderId: 'me', text: 'Yes! Still in stock 🔥', createdAt: new Date(Date.now() - 60000).toISOString() },
-  { id: 'm3', senderId: 'other', text: 'Can I pay on delivery?', createdAt: new Date(Date.now() - 30000).toISOString() },
+const MOCK_MSGS: DBMessage[] = [
+  { id: 'm1', conversation_id: 'demo', sender_id: 'other', text: 'Hey! Is this still available?', read: true, created_at: new Date(Date.now() - 120000).toISOString() },
+  { id: 'm2', conversation_id: 'demo', sender_id: 'me', text: 'Yes! Still in stock 🔥', read: true, created_at: new Date(Date.now() - 60000).toISOString() },
+  { id: 'm3', conversation_id: 'demo', sender_id: 'other', text: 'Can I pay on delivery?', read: false, created_at: new Date(Date.now() - 30000).toISOString() },
 ];
 
 export default function ConversationScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, otherUser } = useLocalSearchParams<{ id: string; otherUser?: string }>();
-  const [messages, setMessages] = useState<Message[]>(MOCK_MSGS);
+  const { authUser } = useApp();
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const flatRef = useRef<FlatList>(null);
+  const channelRef = useRef<any>(null);
 
-  const handleSend = () => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setText('');
-    const newMsg: Message = {
-      id: `m${Date.now()}`,
-      senderId: 'me',
-      text: trimmed,
-      createdAt: new Date().toISOString(),
+  const conversationId = id;
+  const isDemoConvo = !id || id.startsWith('c');
+
+  useEffect(() => {
+    loadMessages();
+    return () => {
+      channelRef.current?.unsubscribe();
     };
-    setMessages(prev => [...prev, newMsg]);
-    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+  }, [conversationId]);
+
+  const loadMessages = async () => {
+    setLoading(true);
+    if (!isDemoConvo && authUser) {
+      const { data, error } = await ChatService.getMessages(conversationId);
+      if (!error && data.length > 0) {
+        setMessages(data);
+        await ChatService.markRead(conversationId, authUser.id);
+      } else {
+        setMessages(MOCK_MSGS);
+      }
+
+      // Subscribe to real-time messages
+      channelRef.current = ChatService.subscribeToMessages(conversationId, (msg) => {
+        setMessages(prev => [...prev, msg]);
+        setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+      });
+    } else {
+      setMessages(MOCK_MSGS);
+    }
+    setLoading(false);
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 200);
   };
 
-  const formatTime = (ts: string) => {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const handleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setText('');
+
+    if (!isDemoConvo && authUser) {
+      setSending(true);
+      const optimistic: any = {
+        id: `opt_${Date.now()}`,
+        conversation_id: conversationId,
+        sender_id: authUser.id,
+        text: trimmed,
+        read: false,
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, optimistic]);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+
+      const { data, error } = await ChatService.sendMessage(conversationId, authUser.id, trimmed);
+      if (data) {
+        setMessages(prev => prev.map(m => m.id === optimistic.id ? data : m));
+      }
+      setSending(false);
+    } else {
+      // Demo mode
+      const newMsg: any = {
+        id: `m${Date.now()}`,
+        conversation_id: 'demo',
+        sender_id: authUser?.id ?? 'me',
+        text: trimmed,
+        read: false,
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, newMsg]);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   };
+
+  const formatTime = (ts: string) =>
+    new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const isMe = (senderId: string) =>
+    authUser ? senderId === authUser.id : senderId === 'me';
 
   return (
     <KeyboardAvoidingView
@@ -69,33 +128,39 @@ export default function ConversationScreen() {
         </Pressable>
       </View>
 
-      <FlatList
-        ref={flatRef}
-        data={messages}
-        keyExtractor={item => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 4 }}
-        renderItem={({ item }) => {
-          const isMe = item.senderId === 'me';
-          return (
-            <View style={[styles.msgRow, isMe ? styles.msgRowMe : styles.msgRowOther]}>
-              {!isMe && (
-                <LinearGradient colors={Gradients.primary} style={styles.msgAvatar}>
-                  <Text style={styles.msgAvatarText}>{(otherUser || 'U').charAt(0).toUpperCase()}</Text>
-                </LinearGradient>
-              )}
-              <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-                <Text style={[styles.bubbleText, isMe ? styles.bubbleTextMe : styles.bubbleTextOther]}>
-                  {item.text}
-                </Text>
-                <Text style={[styles.bubbleTime, isMe ? { color: 'rgba(255,255,255,0.6)' } : { color: Colors.textMuted }]}>
-                  {formatTime(item.createdAt)}
-                </Text>
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={Colors.pink} />
+        </View>
+      ) : (
+        <FlatList
+          ref={flatRef}
+          data={messages}
+          keyExtractor={item => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 4 }}
+          renderItem={({ item }) => {
+            const mine = isMe(item.sender_id);
+            return (
+              <View style={[styles.msgRow, mine ? styles.msgRowMe : styles.msgRowOther]}>
+                {!mine && (
+                  <LinearGradient colors={Gradients.primary} style={styles.msgAvatar}>
+                    <Text style={styles.msgAvatarText}>{(otherUser || 'U').charAt(0).toUpperCase()}</Text>
+                  </LinearGradient>
+                )}
+                <View style={[styles.bubble, mine ? styles.bubbleMe : styles.bubbleOther]}>
+                  <Text style={[styles.bubbleText, mine ? styles.bubbleTextMe : styles.bubbleTextOther]}>
+                    {item.text}
+                  </Text>
+                  <Text style={[styles.bubbleTime, mine ? { color: 'rgba(255,255,255,0.6)' } : { color: Colors.textMuted }]}>
+                    {formatTime(item.created_at)}
+                  </Text>
+                </View>
               </View>
-            </View>
-          );
-        }}
-      />
+            );
+          }}
+        />
+      )}
 
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         <Pressable style={styles.attachBtn} hitSlop={8}>
@@ -109,9 +174,8 @@ export default function ConversationScreen() {
           onChangeText={setText}
           multiline
           maxLength={500}
-          onSubmitEditing={handleSend}
         />
-        <Pressable onPress={handleSend} disabled={!text.trim()} style={styles.sendBtn}>
+        <Pressable onPress={handleSend} disabled={!text.trim() || sending} style={styles.sendBtn}>
           <LinearGradient
             colors={text.trim() ? Gradients.primary : ['#333', '#444']}
             start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}

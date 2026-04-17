@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, ScrollView,
+  View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,59 +9,83 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
+import { PostService } from '@/services/postService';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { PROFILE_POSTS } from '@/constants/data';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, logout, currency } = useApp();
+  const { user, logout, currency, authUser } = useApp();
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
+  const [userPosts, setUserPosts] = useState<any[]>([]);
+  const [savedPosts, setSavedPosts] = useState<any[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const sym = currency.symbol;
 
-  const handleLogout = () => {
-    logout();
+  useEffect(() => {
+    loadPosts();
+  }, [authUser]);
+
+  const loadPosts = async () => {
+    setPostsLoading(true);
+    if (authUser) {
+      const [postsRes, savedRes] = await Promise.all([
+        PostService.getUserPosts(authUser.id),
+        PostService.getSavedPosts(authUser.id),
+      ]);
+      if (!postsRes.error && postsRes.data.length > 0) {
+        setUserPosts(postsRes.data);
+      } else {
+        setUserPosts(PROFILE_POSTS as any[]);
+      }
+      if (!savedRes.error) setSavedPosts(savedRes.data);
+    } else {
+      setUserPosts(PROFILE_POSTS as any[]);
+    }
+    setPostsLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await logout();
     router.replace('/auth');
   };
 
-  const sym = currency.symbol;
-
-  const displayProfile = user || {
+  const displayProfile = user ?? {
     username: 'the_joystreet_shop',
-    displayName: 'Joy Street',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face',
-    location: 'Zambia',
+    display_name: 'Joy Street',
+    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face',
+    country: 'Zambia',
     bio: 'Fashion drops weekly 🔥 Fast shipping | Authentic only',
     verified: true,
-    followers: 15900,
-    following: 610,
-    posts: 6,
-    sold: 186,
+    followers_count: 15900,
+    following_count: 610,
+    posts_count: 6,
+    sold_count: 186,
     rating: 4.6,
-    isSeller: true,
-    walletBalance: 4850,
+    is_seller: true,
+    wallet_balance: 4850,
   };
+
+  const displayPosts = activeTab === 'posts' ? userPosts : savedPosts;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Text style={styles.username}>@{displayProfile.username}</Text>
-            {displayProfile.verified && (
-              <MaterialIcons name="verified" size={16} color={Colors.verified} />
-            )}
+            {displayProfile.verified && <MaterialIcons name="verified" size={16} color={Colors.verified} />}
           </View>
           <Pressable onPress={() => router.push('/menu')} hitSlop={8}>
             <Ionicons name="menu-outline" size={26} color="#fff" />
           </Pressable>
         </View>
 
-        {/* Avatar + Stats */}
         <View style={styles.profileRow}>
           <View style={styles.avatarWrap}>
-            {displayProfile.avatar ? (
-              <Image source={{ uri: displayProfile.avatar }} style={styles.avatar} contentFit="cover" />
+            {displayProfile.avatar_url ? (
+              <Image source={{ uri: displayProfile.avatar_url }} style={styles.avatar} contentFit="cover" />
             ) : (
               <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
                 <Text style={styles.avatarFallbackText}>
@@ -78,10 +102,10 @@ export default function ProfileScreen() {
 
           <View style={styles.stats}>
             {[
-              { label: 'Posts', value: displayProfile.posts || PROFILE_POSTS.length },
-              { label: 'Followers', value: formatCount(displayProfile.followers || 0) },
-              { label: 'Following', value: formatCount(displayProfile.following || 0) },
-              { label: 'Sold', value: displayProfile.sold || 0 },
+              { label: 'Posts', value: displayProfile.posts_count ?? userPosts.length },
+              { label: 'Followers', value: formatCount(displayProfile.followers_count ?? 0) },
+              { label: 'Following', value: formatCount(displayProfile.following_count ?? 0) },
+              { label: 'Sold', value: displayProfile.sold_count ?? 0 },
             ].map(s => (
               <View key={s.label} style={styles.stat}>
                 <Text style={styles.statValue}>{s.value}</Text>
@@ -91,18 +115,16 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Bio */}
         <View style={styles.bioSection}>
-          <Text style={styles.displayName}>{displayProfile.displayName || displayProfile.username}</Text>
+          <Text style={styles.displayName}>{displayProfile.display_name || displayProfile.username}</Text>
           {displayProfile.bio ? <Text style={styles.bio}>{displayProfile.bio}</Text> : null}
-          {displayProfile.location ? (
+          {displayProfile.country ? (
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.location}>{displayProfile.location}</Text>
+              <Text style={styles.location}>{displayProfile.country}</Text>
             </View>
           ) : null}
-
-          {displayProfile.isSeller && (
+          {displayProfile.is_seller && (
             <View style={styles.sellerBadgeRow}>
               <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.sellerBadge}>
                 <Ionicons name="storefront-outline" size={13} color="#fff" />
@@ -110,18 +132,17 @@ export default function ProfileScreen() {
               </LinearGradient>
               <View style={styles.ratingPill}>
                 <Ionicons name="star" size={12} color={Colors.gold} />
-                <Text style={styles.ratingText}>{(displayProfile.rating || 4.5).toFixed(1)}</Text>
+                <Text style={styles.ratingText}>{(displayProfile.rating ?? 4.5).toFixed(1)}</Text>
               </View>
             </View>
           )}
         </View>
 
-        {/* Action Buttons */}
         <View style={styles.actionRow}>
           <Pressable style={styles.editBtn} onPress={() => router.push('/menu')}>
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </Pressable>
-          {displayProfile.isSeller && (
+          {displayProfile.is_seller && (
             <Pressable onPress={() => router.push('/seller-dashboard')} style={styles.dashBtn}>
               <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.dashBtnGrad}>
                 <Ionicons name="storefront-outline" size={15} color="#fff" />
@@ -134,21 +155,19 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* Seller wallet preview */}
-        {displayProfile.isSeller && (
+        {displayProfile.is_seller && (
           <Pressable onPress={() => router.push('/wallet')} style={styles.walletCard}>
             <View style={styles.walletCardLeft}>
               <Ionicons name="wallet" size={18} color={Colors.pink} />
               <View>
                 <Text style={styles.walletCardLabel}>Wallet Balance</Text>
-                <Text style={styles.walletCardValue}>{sym}{(displayProfile.walletBalance || 0).toLocaleString()}</Text>
+                <Text style={styles.walletCardValue}>{sym}{(displayProfile.wallet_balance ?? 0).toLocaleString()}</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
           </Pressable>
         )}
 
-        {/* Post grid tabs */}
         <View style={styles.tabRow}>
           <Pressable onPress={() => setActiveTab('posts')} style={[styles.tab, activeTab === 'posts' && styles.tabActive]}>
             <Ionicons name="grid-outline" size={20} color={activeTab === 'posts' ? Colors.pink : Colors.textMuted} />
@@ -158,29 +177,34 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* Grid */}
-        <View style={styles.grid}>
-          {PROFILE_POSTS.map((post: any) => (
-            <Pressable
-              key={post.id}
-              style={styles.gridItem}
-              onPress={() => router.push(`/post/${post.id}`)}
-            >
-              <Image
-                source={{ uri: post.image || post.media_urls?.[0] }}
-                style={styles.gridImg}
-                contentFit="cover"
-              />
-              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
-                <Text style={styles.gridPrice}>{post.price || `${sym}${post.price_num || ''}`}</Text>
-                <View style={styles.gridLikes}>
-                  <Ionicons name="heart" size={11} color="#fff" />
-                  <Text style={styles.gridLikesText}>{formatCount(post.likes || 0)}</Text>
-                </View>
-              </LinearGradient>
-            </Pressable>
-          ))}
-        </View>
+        {postsLoading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator color={Colors.pink} />
+          </View>
+        ) : (
+          <View style={styles.grid}>
+            {displayPosts.map((post: any) => (
+              <Pressable
+                key={post.id}
+                style={styles.gridItem}
+                onPress={() => router.push(`/post/${post.id}`)}
+              >
+                <Image
+                  source={{ uri: post.image || post.media_urls?.[0] }}
+                  style={styles.gridImg}
+                  contentFit="cover"
+                />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
+                  <Text style={styles.gridPrice}>{post.price_text || post.price || `${sym}${post.price_num || ''}`}</Text>
+                  <View style={styles.gridLikes}>
+                    <Ionicons name="heart" size={11} color="#fff" />
+                    <Text style={styles.gridLikesText}>{formatCount(post.likes_count || post.likes || 0)}</Text>
+                  </View>
+                </LinearGradient>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <BottomTabBar />

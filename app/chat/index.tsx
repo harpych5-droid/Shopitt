@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, TextInput,
 } from 'react-native';
@@ -8,6 +8,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
+import { useApp } from '@/contexts/AppContext';
+import { ChatService } from '@/services/chatService';
+import { ProfileService } from '@/services/profileService';
 import { CHAT_LIST } from '@/constants/data';
 
 function formatTime(ts: string | undefined): string {
@@ -26,11 +29,51 @@ function formatTime(ts: string | undefined): string {
 export default function ChatListScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { authUser } = useApp();
   const [search, setSearch] = useState('');
+  const [convos, setConvos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadConversations();
+  }, [authUser]);
+
+  const loadConversations = async () => {
+    setLoading(true);
+    if (authUser) {
+      const { data, error } = await ChatService.getConversations(authUser.id);
+      if (!error && data.length > 0) {
+        // Enrich with other user profiles
+        const enriched = await Promise.all(
+          data.map(async (c: any) => {
+            const otherUserId = c.participant_1 === authUser.id ? c.participant_2 : c.participant_1;
+            const { data: profile } = await ProfileService.getProfile(otherUserId);
+            const unread = c.participant_1 === authUser.id ? c.unread_1 : c.unread_2;
+            return {
+              id: c.id,
+              username: profile?.username ?? 'User',
+              avatar: profile?.avatar_url ?? null,
+              lastMessage: c.last_message ?? '',
+              time: formatTime(c.last_message_at),
+              unread: unread ?? 0,
+              online: false,
+              otherUserId,
+            };
+          })
+        );
+        setConvos(enriched);
+      } else {
+        setConvos(CHAT_LIST);
+      }
+    } else {
+      setConvos(CHAT_LIST);
+    }
+    setLoading(false);
+  };
 
   const filtered = search.trim()
-    ? CHAT_LIST.filter(c => (c.username || '').toLowerCase().includes(search.toLowerCase()))
-    : CHAT_LIST;
+    ? convos.filter(c => (c.username || '').toLowerCase().includes(search.toLowerCase()))
+    : convos;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -68,7 +111,10 @@ export default function ChatListScreen() {
           const unread = item.unread || 0;
           const online = item.online || false;
           return (
-            <Pressable onPress={() => router.push(`/chat/${item.id}?otherUser=${username}`)} style={styles.convoItem}>
+            <Pressable
+              onPress={() => router.push(`/chat/${item.id}?otherUser=${username}`)}
+              style={styles.convoItem}
+            >
               <View style={styles.avatarWrap}>
                 {avatar ? (
                   <Image source={{ uri: avatar }} style={styles.avatar} contentFit="cover" />

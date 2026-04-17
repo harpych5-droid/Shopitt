@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
+import { WalletService } from '@/services/walletService';
 import { REVENUE_DATA } from '@/constants/data';
 
 function useAnimatedCount(target: number, duration = 1200) {
@@ -22,13 +23,6 @@ function useAnimatedCount(target: number, duration = 1200) {
   return display;
 }
 
-const MOCK_TRANSACTIONS = [
-  { id: 't1', type: 'credit', amount: 1620, description: 'Order SHP-001 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: 't2', type: 'credit', amount: 810, description: 'Order SHP-002 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: 't3', type: 'withdrawal', amount: -2000, description: 'Withdrawal to MTN +260977001122', status: 'completed', created_at: new Date(Date.now() - 172800000).toISOString() },
-  { id: 't4', type: 'credit', amount: 1620, description: 'Order SHP-003 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 259200000).toISOString() },
-];
-
 const PROVIDERS = [
   { id: 'mtn', label: 'MTN Mobile Money', icon: '📱' },
   { id: 'airtel', label: 'Airtel Money', icon: '📲' },
@@ -39,10 +33,14 @@ const PROVIDERS = [
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { currency } = useApp();
+  const { currency, authUser, user } = useApp();
 
-  const [balance, setBalance] = useState(4850);
-  const totalEarnings = 49200;
+  const [balance, setBalance] = useState(user?.wallet_balance ?? 0);
+  const [totalEarnings, setTotalEarnings] = useState(0);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [revenueData, setRevenueData] = useState(REVENUE_DATA);
+  const [loading, setLoading] = useState(true);
+
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [provider, setProvider] = useState('mtn');
   const [phone, setPhone] = useState('');
@@ -56,6 +54,29 @@ export default function WalletScreen() {
   const displayEarnings = useAnimatedCount(totalEarnings);
   const sym = currency.symbol;
 
+  useEffect(() => {
+    loadWallet();
+  }, [authUser]);
+
+  const loadWallet = async () => {
+    if (!authUser) { setLoading(false); return; }
+    setLoading(true);
+
+    const [balRes, txRes, earningsRes, weeklyRes] = await Promise.all([
+      WalletService.getBalance(authUser.id),
+      WalletService.getTransactions(authUser.id),
+      WalletService.getTotalEarnings(authUser.id),
+      WalletService.getWeeklyRevenue(authUser.id),
+    ]);
+
+    setBalance(balRes);
+    if (txRes.data.length > 0) setTransactions(txRes.data);
+    setTotalEarnings(earningsRes.total);
+    if (weeklyRes.some(d => d.value > 0)) setRevenueData(weeklyRes);
+
+    setLoading(false);
+  };
+
   const openWithdraw = () => {
     setShowWithdraw(true);
     Animated.spring(modalY, { toValue: 0, useNativeDriver: true, tension: 50, friction: 9 }).start();
@@ -65,28 +86,37 @@ export default function WalletScreen() {
     Animated.timing(modalY, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => setShowWithdraw(false));
   };
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
     const amount = parseFloat(withdrawAmount);
     if (!phone.trim() || !amount || amount <= 0 || amount > balance) return;
     setWithdrawing(true);
+
     // Insert payment gateway API here
+    if (authUser) {
+      await WalletService.requestWithdrawal(authUser.id, amount, provider, phone);
+    }
+
+    Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
+    setWithdrawing(false);
+    setSuccess(true);
+    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
     setTimeout(() => {
-      Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
-      setWithdrawing(false);
-      setSuccess(true);
-      Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
-      setTimeout(() => {
-        setSuccess(false);
-        successScale.setValue(0);
-        setShowWithdraw(false);
-        setBalance(prev => prev - amount);
-        setWithdrawAmount('');
-        setPhone('');
-      }, 2500);
-    }, 1200);
+      setSuccess(false);
+      successScale.setValue(0);
+      setShowWithdraw(false);
+      setBalance(prev => prev - amount);
+      setWithdrawAmount('');
+      setPhone('');
+    }, 2500);
   };
 
-  const barMax = Math.max(...REVENUE_DATA.map(d => d.value));
+  const barMax = Math.max(...revenueData.map(d => d.value), 1);
+
+  const displayTx = transactions.length > 0 ? transactions : [
+    { id: 't1', type: 'credit', amount: 1620, description: 'Order — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 3600000).toISOString() },
+    { id: 't2', type: 'credit', amount: 810, description: 'Order — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 86400000).toISOString() },
+    { id: 't3', type: 'withdrawal', amount: -2000, description: `Withdrawal to MTN`, status: 'completed', created_at: new Date(Date.now() - 172800000).toISOString() },
+  ];
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -123,7 +153,7 @@ export default function WalletScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Revenue — This Week</Text>
           <View style={styles.chart}>
-            {REVENUE_DATA.map((d, i) => (
+            {revenueData.map((d, i) => (
               <View key={i} style={styles.bar}>
                 <Text style={styles.barVal}>{d.label}</Text>
                 <View style={styles.barTrack}>
@@ -137,7 +167,7 @@ export default function WalletScreen() {
 
         <View style={[styles.section, { paddingBottom: 0 }]}>
           <Text style={styles.sectionTitle}>Transaction History</Text>
-          {MOCK_TRANSACTIONS.map(tx => (
+          {displayTx.map((tx: any) => (
             <View key={tx.id} style={styles.txItem}>
               <View style={[styles.txIcon, { backgroundColor: tx.type === 'credit' ? 'rgba(0,200,81,0.1)' : 'rgba(255,59,48,0.1)' }]}>
                 <Ionicons name={tx.type === 'credit' ? 'arrow-down' : 'arrow-up'} size={16} color={tx.type === 'credit' ? Colors.success : Colors.error} />

@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, FlatList,
+  View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
+import { NotificationService } from '@/services/notificationService';
 import { NOTIFICATIONS_DATA } from '@/constants/data';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 
@@ -26,11 +27,7 @@ function NotifItem({ item, onPress }: { item: any; onPress: () => void }) {
     <Pressable onPress={onPress} style={[styles.item, !item.read && styles.itemUnread]}>
       <View style={styles.iconWrap}>
         {item.avatar_url || item.avatar ? (
-          <Image
-            source={{ uri: item.avatar_url || item.avatar }}
-            style={styles.avatar}
-            contentFit="cover"
-          />
+          <Image source={{ uri: item.avatar_url || item.avatar }} style={styles.avatar} contentFit="cover" />
         ) : (
           <LinearGradient colors={Gradients.primary} style={styles.iconGrad}>
             <Ionicons name={iconInfo.name as any} size={18} color="#fff" />
@@ -43,7 +40,9 @@ function NotifItem({ item, onPress }: { item: any; onPress: () => void }) {
       <View style={styles.content}>
         <Text style={styles.title}>{item.title}</Text>
         <Text style={styles.body} numberOfLines={2}>{item.body}</Text>
-        <Text style={styles.time}>{item.time || ''}</Text>
+        <Text style={styles.time}>
+          {item.time || (item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
+        </Text>
       </View>
       {!item.read && <View style={styles.unreadDot} />}
     </Pressable>
@@ -53,49 +52,80 @@ function NotifItem({ item, onPress }: { item: any; onPress: () => void }) {
 export default function AlertsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { notifCount, refreshNotifCount } = useApp();
-  const [notifs, setNotifs] = useState<any[]>(NOTIFICATIONS_DATA);
+  const { notifCount, refreshNotifCount, authUser } = useApp();
+  const [notifs, setNotifs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const markAllRead = () => {
+  useEffect(() => {
+    loadNotifs();
+  }, [authUser]);
+
+  const loadNotifs = async () => {
+    setLoading(true);
+    if (authUser) {
+      const { data, error } = await NotificationService.getNotifications(authUser.id);
+      if (!error && data.length > 0) {
+        setNotifs(data);
+      } else {
+        setNotifs(NOTIFICATIONS_DATA as any[]);
+      }
+    } else {
+      setNotifs(NOTIFICATIONS_DATA as any[]);
+    }
+    setLoading(false);
+  };
+
+  const markAllRead = async () => {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    if (authUser) await NotificationService.markAllRead(authUser.id);
     refreshNotifCount();
   };
 
-  const handleNotifPress = (notif: any) => {
+  const handleNotifPress = async (notif: any) => {
     setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    if (authUser) await NotificationService.markRead(notif.id);
     if (notif.type === 'order') router.push('/order-tracking');
     else if (notif.type === 'message') router.push('/chat');
+    else if (notif.related_type === 'post' && notif.related_id) router.push(`/post/${notif.related_id}`);
   };
+
+  const hasUnread = notifs.some(n => !n.read);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Notifications</Text>
-        {notifs.some(n => !n.read) && (
+        {hasUnread && (
           <Pressable onPress={markAllRead} style={styles.markAllBtn} hitSlop={8}>
             <Text style={styles.markAllText}>Mark all read</Text>
           </Pressable>
         )}
       </View>
 
-      <FlatList
-        data={notifs}
-        keyExtractor={item => item.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}
-        renderItem={({ item }) => (
-          <NotifItem item={item} onPress={() => handleNotifPress(item)} />
-        )}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <LinearGradient colors={Gradients.primary} style={styles.emptyIcon}>
-              <Ionicons name="notifications-outline" size={32} color="#fff" />
-            </LinearGradient>
-            <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptySubtitle}>No new notifications</Text>
-          </View>
-        }
-      />
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={Colors.pink} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={notifs}
+          keyExtractor={item => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}
+          renderItem={({ item }) => (
+            <NotifItem item={item} onPress={() => handleNotifPress(item)} />
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <LinearGradient colors={Gradients.primary} style={styles.emptyIcon}>
+                <Ionicons name="notifications-outline" size={32} color="#fff" />
+              </LinearGradient>
+              <Text style={styles.emptyTitle}>All caught up!</Text>
+              <Text style={styles.emptySubtitle}>No new notifications</Text>
+            </View>
+          }
+        />
+      )}
       <BottomTabBar />
     </View>
   );
@@ -111,6 +141,7 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
   markAllBtn: { paddingVertical: 6, paddingHorizontal: 10 },
   markAllText: { color: Colors.pink, fontSize: Typography.sm, fontWeight: Typography.semibold },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   item: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,

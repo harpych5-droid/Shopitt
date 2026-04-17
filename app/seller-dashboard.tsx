@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +10,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
+import { OrderService } from '@/services/orderService';
+import { WalletService } from '@/services/walletService';
+import { PostService } from '@/services/postService';
+import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { SELLER_ORDERS, REVENUE_DATA } from '@/constants/data';
 
 type StatusFilter = 'all' | 'new' | 'pending' | 'confirmed' | 'shipped' | 'delivered';
@@ -39,25 +44,67 @@ const STATUS_MAP: Record<string, string> = {
 export default function SellerDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { currency } = useApp();
-  const [orders, setOrders] = useState<any[]>(SELLER_ORDERS);
+  const { authUser, currency, user } = useApp();
+  const [orders, setOrders] = useState<any[]>([]);
+  const [revenueData, setRevenueData] = useState(REVENUE_DATA);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [walletBalance, setWalletBalance] = useState(user?.wallet_balance ?? 0);
   const [filter, setFilter] = useState<StatusFilter>('all');
+  const [loading, setLoading] = useState(true);
   const sym = currency.symbol;
 
-  const handleStatusUpdate = (orderId: string, currentStatus: string) => {
-    const next = STATUS_MAP[currentStatus];
+  useEffect(() => {
+    loadDashboard();
+  }, [authUser]);
+
+  const loadDashboard = async () => {
+    setLoading(true);
+    if (authUser) {
+      const [ordersRes, revenueRes, weeklyRes, balanceRes] = await Promise.all([
+        OrderService.getSellerOrders(authUser.id),
+        OrderService.getSellerRevenue(authUser.id),
+        WalletService.getWeeklyRevenue(authUser.id),
+        WalletService.getBalance(authUser.id),
+      ]);
+
+      if (!ordersRes.error && ordersRes.data.length > 0) {
+        setOrders(ordersRes.data.map(o => ({
+          ...o,
+          buyer: o.buyer?.username ?? 'Buyer',
+          buyerAvatar: (o.buyer as any)?.avatar_url,
+          product: (o.post as any)?.drop_title ?? 'Product',
+          total: o.total,
+          location: (o.delivery_address as any)?.city + ', ' + (o.delivery_address as any)?.country || 'Unknown',
+          time: new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isNew: o.status === 'new',
+        })));
+      } else {
+        setOrders(SELLER_ORDERS.map((o: any) => ({ ...o, total: parseFloat(String(o.total).replace(/[^0-9.]/g, '')) || 0 })));
+      }
+
+      if (revenueRes) setTotalRevenue(revenueRes.total);
+      if (weeklyRes.some(d => d.value > 0)) setRevenueData(weeklyRes);
+      setWalletBalance(balanceRes);
+    } else {
+      setOrders(SELLER_ORDERS.map((o: any) => ({ ...o, total: parseFloat(String(o.total).replace(/[^0-9.]/g, '')) || 0 })));
+    }
+    setLoading(false);
+  };
+
+  const handleStatusUpdate = async (orderId: string, currentStatus: string) => {
+    const next = STATUS_MAP[currentStatus] as any;
     if (!next) return;
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: next } : o));
+    if (authUser) {
+      await OrderService.updateOrderStatus(orderId, next, authUser.id);
+    }
   };
 
   const filtered = filter === 'all' ? orders : orders.filter(o => o.status === filter);
-
-  const totalRevenue = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + ((o.total || 0) * 0.9), 0);
   const pendingOrders = orders.filter(o => ['new', 'pending', 'confirmed'].includes(o.status)).length;
   const completedOrders = orders.filter(o => o.status === 'delivered').length;
   const totalOrders = orders.length;
-
-  const barMax = Math.max(...REVENUE_DATA.map(d => d.value));
+  const barMax = Math.max(...revenueData.map(d => d.value), 1);
   const STATUS_TABS: StatusFilter[] = ['all', 'new', 'pending', 'confirmed', 'shipped', 'delivered'];
 
   return (
@@ -72,99 +119,102 @@ export default function SellerDashboardScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-        {/* Stats row */}
-        <View style={styles.statsRow}>
-          <StatCard label="Revenue" value={`${sym}${Math.round(totalRevenue).toLocaleString()}`} icon="trending-up" color={Colors.pink} />
-          <StatCard label="Orders" value={String(totalOrders)} icon="bag-outline" color={Colors.purple} />
-          <StatCard label="Pending" value={String(pendingOrders)} icon="time-outline" color={Colors.orange} />
-          <StatCard label="Done" value={String(completedOrders)} icon="checkmark-circle-outline" color={Colors.success} />
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={Colors.pink} size="large" />
         </View>
-
-        {/* Revenue chart */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Revenue — This Week</Text>
-          <View style={styles.chart}>
-            {REVENUE_DATA.map((d, i) => (
-              <View key={i} style={styles.bar}>
-                <Text style={styles.barLabel}>{d.label}</Text>
-                <View style={styles.barTrack}>
-                  <LinearGradient colors={Gradients.primary} style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]} />
-                </View>
-                <Text style={styles.barDay}>{d.day}</Text>
-              </View>
-            ))}
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+          <View style={styles.statsRow}>
+            <StatCard label="Revenue" value={`${sym}${Math.round(totalRevenue).toLocaleString()}`} icon="trending-up" color={Colors.pink} />
+            <StatCard label="Orders" value={String(totalOrders)} icon="bag-outline" color={Colors.purple} />
+            <StatCard label="Pending" value={String(pendingOrders)} icon="time-outline" color={Colors.orange} />
+            <StatCard label="Done" value={String(completedOrders)} icon="checkmark-circle-outline" color={Colors.success} />
           </View>
-        </View>
 
-        {/* Orders */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Orders</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {STATUS_TABS.map(s => (
-                <Pressable key={s} onPress={() => setFilter(s)}
-                  style={[styles.filterTab, filter === s && styles.filterTabActive]}>
-                  <Text style={[styles.filterTabText, filter === s && styles.filterTabTextActive]}>
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                    {s === 'all' ? ` (${totalOrders})` : ` (${orders.filter(o => o.status === s).length})`}
-                  </Text>
-                </Pressable>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Revenue — This Week</Text>
+            <View style={styles.chart}>
+              {revenueData.map((d, i) => (
+                <View key={i} style={styles.bar}>
+                  <Text style={styles.barLabel}>{d.label}</Text>
+                  <View style={styles.barTrack}>
+                    <LinearGradient colors={Gradients.primary} style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]} />
+                  </View>
+                  <Text style={styles.barDay}>{d.day}</Text>
+                </View>
               ))}
             </View>
-          </ScrollView>
+          </View>
 
-          {filtered.length === 0 ? (
-            <Text style={{ color: Colors.textMuted, textAlign: 'center', padding: 20 }}>No orders in this status</Text>
-          ) : (
-            filtered.map(order => (
-              <View key={order.id} style={styles.orderCard}>
-                <View style={styles.orderTop}>
-                  {order.buyerAvatar ? (
-                    <Image source={{ uri: order.buyerAvatar }} style={styles.buyerAvatar} contentFit="cover" />
-                  ) : (
-                    <LinearGradient colors={Gradients.primary} style={styles.buyerAvatarFallback}>
-                      <Text style={{ color: '#fff', fontWeight: Typography.bold }}>
-                        {(order.buyer || 'U').charAt(0).toUpperCase()}
-                      </Text>
-                    </LinearGradient>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.orderId}>{order.id}</Text>
-                    <Text style={styles.orderBuyer}>{order.buyer || 'Buyer'}</Text>
-                    <Text style={styles.orderProduct} numberOfLines={1}>{order.product || 'Product'}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                    <Text style={styles.orderTotal}>{order.total ? `${sym}${order.total}` : 'K---'}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: `${STATUS_COLORS[order.status]}22`, borderColor: `${STATUS_COLORS[order.status]}44` }]}>
-                      <Text style={[styles.statusText, { color: STATUS_COLORS[order.status] }]}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                      </Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Orders</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {STATUS_TABS.map(s => (
+                  <Pressable key={s} onPress={() => setFilter(s)}
+                    style={[styles.filterTab, filter === s && styles.filterTabActive]}>
+                    <Text style={[styles.filterTabText, filter === s && styles.filterTabTextActive]}>
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                      {s === 'all' ? ` (${totalOrders})` : ` (${orders.filter(o => o.status === s).length})`}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+
+            {filtered.length === 0 ? (
+              <Text style={{ color: Colors.textMuted, textAlign: 'center', padding: 20 }}>No orders in this status</Text>
+            ) : (
+              filtered.map(order => (
+                <View key={order.id} style={styles.orderCard}>
+                  <View style={styles.orderTop}>
+                    {order.buyerAvatar ? (
+                      <Image source={{ uri: order.buyerAvatar }} style={styles.buyerAvatar} contentFit="cover" />
+                    ) : (
+                      <LinearGradient colors={Gradients.primary} style={styles.buyerAvatarFallback}>
+                        <Text style={{ color: '#fff', fontWeight: Typography.bold }}>
+                          {(order.buyer || 'U').charAt(0).toUpperCase()}
+                        </Text>
+                      </LinearGradient>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.orderId}>{order.id?.slice(0, 12) || order.order_number || 'ORDER'}</Text>
+                      <Text style={styles.orderBuyer}>@{order.buyer || 'Buyer'}</Text>
+                      <Text style={styles.orderProduct} numberOfLines={1}>{order.product || 'Product'}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                      <Text style={styles.orderTotal}>{sym}{typeof order.total === 'number' ? order.total.toLocaleString() : order.total}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: `${STATUS_COLORS[order.status]}22`, borderColor: `${STATUS_COLORS[order.status]}44` }]}>
+                        <Text style={[styles.statusText, { color: STATUS_COLORS[order.status] }]}>
+                          {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                        </Text>
+                      </View>
                     </View>
                   </View>
-                </View>
 
-                <View style={styles.orderMeta}>
-                  <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
-                  <Text style={styles.orderMetaText}>{order.location || 'Unknown'}</Text>
-                  <Text style={styles.orderMetaText}>· {order.time || ''}</Text>
-                  {order.isNew && (
-                    <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
+                  <View style={styles.orderMeta}>
+                    <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                    <Text style={styles.orderMetaText}>{order.location || 'Unknown'}</Text>
+                    <Text style={styles.orderMetaText}>· {order.time || ''}</Text>
+                    {order.isNew && (
+                      <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
+                    )}
+                  </View>
+
+                  {order.status !== 'delivered' && (
+                    <Pressable onPress={() => handleStatusUpdate(order.id, order.status)} style={{ marginTop: 10 }}>
+                      <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.orderActionBtn}>
+                        <Text style={styles.orderActionText}>{STATUS_NEXT[order.status] || 'Update'}</Text>
+                      </LinearGradient>
+                    </Pressable>
                   )}
                 </View>
-
-                {order.status !== 'delivered' && (
-                  <Pressable onPress={() => handleStatusUpdate(order.id, order.status)} style={{ marginTop: 10 }}>
-                    <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.orderActionBtn}>
-                      <Text style={styles.orderActionText}>{STATUS_NEXT[order.status] || 'Update'}</Text>
-                    </LinearGradient>
-                  </Pressable>
-                )}
-              </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      )}
     </View>
   );
 }
