@@ -1,17 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView, Animated,
-  TextInput, FlatList, ActivityIndicator,
+  TextInput,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { WalletService } from '@/services/walletService';
-import { DbWalletTransaction } from '@/lib/types';
 import { REVENUE_DATA } from '@/constants/data';
 
 function useAnimatedCount(target: number, duration = 1200) {
@@ -25,6 +22,13 @@ function useAnimatedCount(target: number, duration = 1200) {
   return display;
 }
 
+const MOCK_TRANSACTIONS = [
+  { id: 't1', type: 'credit', amount: 1620, description: 'Order SHP-001 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 3600000).toISOString() },
+  { id: 't2', type: 'credit', amount: 810, description: 'Order SHP-002 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: 't3', type: 'withdrawal', amount: -2000, description: 'Withdrawal to MTN +260977001122', status: 'completed', created_at: new Date(Date.now() - 172800000).toISOString() },
+  { id: 't4', type: 'credit', amount: 1620, description: 'Order SHP-003 — after 10% commission', status: 'completed', created_at: new Date(Date.now() - 259200000).toISOString() },
+];
+
 const PROVIDERS = [
   { id: 'mtn', label: 'MTN Mobile Money', icon: '📱' },
   { id: 'airtel', label: 'Airtel Money', icon: '📲' },
@@ -35,14 +39,10 @@ const PROVIDERS = [
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, profile, currency } = useApp();
+  const { currency } = useApp();
 
-  const [balance, setBalance] = useState(0);
-  const [totalEarnings, setTotalEarnings] = useState(0);
-  const [transactions, setTransactions] = useState<DbWalletTransaction[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  // Withdraw modal
+  const [balance, setBalance] = useState(4850);
+  const totalEarnings = 49200;
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [provider, setProvider] = useState('mtn');
   const [phone, setPhone] = useState('');
@@ -56,30 +56,6 @@ export default function WalletScreen() {
   const displayEarnings = useAnimatedCount(totalEarnings);
   const sym = currency.symbol;
 
-  useEffect(() => {
-    loadWallet();
-  }, [authUser]);
-
-  const loadWallet = async () => {
-    setLoading(true);
-    if (authUser) {
-      const [bal, earn, txns] = await Promise.all([
-        WalletService.getBalance(authUser.id),
-        WalletService.getTotalEarnings(authUser.id),
-        WalletService.getTransactions(authUser.id),
-      ]);
-      setBalance(bal);
-      setTotalEarnings(earn);
-      setTransactions(txns);
-    } else {
-      // Mock data
-      setBalance(4850);
-      setTotalEarnings(49200);
-      setTransactions(MOCK_TRANSACTIONS);
-    }
-    setLoading(false);
-  };
-
   const openWithdraw = () => {
     setShowWithdraw(true);
     Animated.spring(modalY, { toValue: 0, useNativeDriver: true, tension: 50, friction: 9 }).start();
@@ -89,30 +65,25 @@ export default function WalletScreen() {
     Animated.timing(modalY, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => setShowWithdraw(false));
   };
 
-  const handleWithdraw = async () => {
+  const handleWithdraw = () => {
     const amount = parseFloat(withdrawAmount);
     if (!phone.trim() || !amount || amount <= 0 || amount > balance) return;
     setWithdrawing(true);
-
-    // Insert payment gateway API here — e.g. MTN Mobile Money Zambia Disbursement API
-    const desc = `Withdrawal to ${phone} via ${PROVIDERS.find(p => p.id === provider)?.label}`;
-
-    if (authUser) {
-      await WalletService.requestWithdrawal(authUser.id, amount, desc);
-    }
-
-    Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
-    setWithdrawing(false);
-    setSuccess(true);
-    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+    // Insert payment gateway API here
     setTimeout(() => {
-      setSuccess(false);
-      successScale.setValue(0);
-      setShowWithdraw(false);
-      setBalance(prev => prev - amount);
-      setWithdrawAmount('');
-      setPhone('');
-    }, 2500);
+      Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
+      setWithdrawing(false);
+      setSuccess(true);
+      Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+      setTimeout(() => {
+        setSuccess(false);
+        successScale.setValue(0);
+        setShowWithdraw(false);
+        setBalance(prev => prev - amount);
+        setWithdrawAmount('');
+        setPhone('');
+      }, 2500);
+    }, 1200);
   };
 
   const barMax = Math.max(...REVENUE_DATA.map(d => d.value));
@@ -128,7 +99,6 @@ export default function WalletScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-        {/* Balance hero */}
         <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[styles.balanceCard, Shadow.glow]}>
           <Text style={styles.balanceLabel}>Available Balance</Text>
@@ -150,7 +120,6 @@ export default function WalletScreen() {
           </Pressable>
         </LinearGradient>
 
-        {/* Revenue chart */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Revenue — This Week</Text>
           <View style={styles.chart}>
@@ -158,10 +127,7 @@ export default function WalletScreen() {
               <View key={i} style={styles.bar}>
                 <Text style={styles.barVal}>{d.label}</Text>
                 <View style={styles.barTrack}>
-                  <LinearGradient
-                    colors={Gradients.primary}
-                    style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]}
-                  />
+                  <LinearGradient colors={Gradients.primary} style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]} />
                 </View>
                 <Text style={styles.barLabel}>{d.day}</Text>
               </View>
@@ -169,40 +135,28 @@ export default function WalletScreen() {
           </View>
         </View>
 
-        {/* Transaction history */}
         <View style={[styles.section, { paddingBottom: 0 }]}>
           <Text style={styles.sectionTitle}>Transaction History</Text>
-          {loading ? (
-            <ActivityIndicator color={Colors.pink} style={{ marginTop: 20 }} />
-          ) : transactions.length === 0 ? (
-            <Text style={{ color: Colors.textMuted, textAlign: 'center', marginTop: 16 }}>No transactions yet</Text>
-          ) : (
-            transactions.map(tx => (
-              <View key={tx.id} style={styles.txItem}>
-                <View style={[styles.txIcon, { backgroundColor: (tx.type === 'credit') ? 'rgba(0,200,81,0.1)' : 'rgba(255,59,48,0.1)' }]}>
-                  <Ionicons
-                    name={(tx.type === 'credit') ? 'arrow-down' : 'arrow-up'}
-                    size={16}
-                    color={(tx.type === 'credit') ? Colors.success : Colors.error}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.txDesc} numberOfLines={1}>{tx.description || tx.type}</Text>
-                  <Text style={styles.txDate}>{new Date(tx.created_at).toLocaleDateString()}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[styles.txAmount, { color: tx.type === 'credit' ? Colors.success : Colors.error }]}>
-                    {tx.type === 'credit' ? '+' : ''}{sym}{Math.abs(tx.amount).toLocaleString()}
-                  </Text>
-                  <Text style={styles.txStatus}>{tx.status}</Text>
-                </View>
+          {MOCK_TRANSACTIONS.map(tx => (
+            <View key={tx.id} style={styles.txItem}>
+              <View style={[styles.txIcon, { backgroundColor: tx.type === 'credit' ? 'rgba(0,200,81,0.1)' : 'rgba(255,59,48,0.1)' }]}>
+                <Ionicons name={tx.type === 'credit' ? 'arrow-down' : 'arrow-up'} size={16} color={tx.type === 'credit' ? Colors.success : Colors.error} />
               </View>
-            ))
-          )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.txDesc} numberOfLines={1}>{tx.description}</Text>
+                <Text style={styles.txDate}>{new Date(tx.created_at).toLocaleDateString()}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[styles.txAmount, { color: tx.type === 'credit' ? Colors.success : Colors.error }]}>
+                  {tx.type === 'credit' ? '+' : ''}{sym}{Math.abs(tx.amount).toLocaleString()}
+                </Text>
+                <Text style={styles.txStatus}>{tx.status}</Text>
+              </View>
+            </View>
+          ))}
         </View>
       </ScrollView>
 
-      {/* WITHDRAW MODAL */}
       {showWithdraw && (
         <Animated.View style={[styles.modal, { transform: [{ translateY: modalY }] }]}>
           <View style={styles.modalHandle} />
@@ -212,11 +166,8 @@ export default function WalletScreen() {
               <Ionicons name="close" size={24} color={Colors.textSecondary} />
             </Pressable>
           </View>
-
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalLabel}>Available: {sym}{balance.toLocaleString()}</Text>
-
-            {/* Provider */}
             <Text style={styles.modalSectionLabel}>Select Provider</Text>
             {PROVIDERS.map(p => (
               <Pressable key={p.id} onPress={() => setProvider(p.id)}
@@ -226,39 +177,15 @@ export default function WalletScreen() {
                 {provider === p.id && <Ionicons name="checkmark-circle" size={20} color={Colors.pink} />}
               </Pressable>
             ))}
-
-            {/* Phone */}
             <Text style={styles.modalSectionLabel}>Phone Number</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="+260 97X XXX XXX"
-              placeholderTextColor={Colors.textMuted}
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-
-            {/* Amount */}
+            <TextInput style={styles.modalInput} placeholder="+260 97X XXX XXX" placeholderTextColor={Colors.textMuted} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
             <Text style={styles.modalSectionLabel}>Amount ({sym})</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter amount"
-              placeholderTextColor={Colors.textMuted}
-              value={withdrawAmount}
-              onChangeText={setWithdrawAmount}
-              keyboardType="numeric"
-            />
-
+            <TextInput style={styles.modalInput} placeholder="Enter amount" placeholderTextColor={Colors.textMuted} value={withdrawAmount} onChangeText={setWithdrawAmount} keyboardType="numeric" />
             <Pressable onPress={handleWithdraw} disabled={withdrawing}>
-              <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                style={[styles.withdrawSubmit, Shadow.glow]}>
-                {withdrawing
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.withdrawSubmitText}>Confirm Withdrawal</Text>
-                }
+              <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.withdrawSubmit, Shadow.glow]}>
+                <Text style={styles.withdrawSubmitText}>{withdrawing ? 'Processing...' : 'Confirm Withdrawal'}</Text>
               </LinearGradient>
             </Pressable>
-
             <View style={styles.paymentNote}>
               <Ionicons name="information-circle-outline" size={14} color={Colors.textMuted} />
               <Text style={styles.paymentNoteText}>
@@ -271,7 +198,6 @@ export default function WalletScreen() {
         </Animated.View>
       )}
 
-      {/* SUCCESS OVERLAY */}
       {success && (
         <View style={styles.successOverlay}>
           <Animated.View style={[styles.successCard, { transform: [{ scale: successScale }] }]}>
@@ -287,13 +213,6 @@ export default function WalletScreen() {
   );
 }
 
-const MOCK_TRANSACTIONS: DbWalletTransaction[] = [
-  { id: 't1', user_id: '', type: 'credit', amount: 1620, description: 'Order SHP-001 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: 't2', user_id: '', type: 'credit', amount: 810, description: 'Order SHP-002 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: 't3', user_id: '', type: 'withdrawal', amount: -2000, description: 'Withdrawal to MTN +260977001122', order_id: null, status: 'completed', created_at: new Date(Date.now() - 172800000).toISOString() },
-  { id: 't4', user_id: '', type: 'credit', amount: 1620, description: 'Order SHP-003 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 259200000).toISOString() },
-];
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
@@ -301,7 +220,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
-
   balanceCard: { margin: 16, borderRadius: Radius.xl, padding: 24, gap: 14 },
   balanceLabel: { color: 'rgba(255,255,255,0.8)', fontSize: Typography.sm },
   balanceAmount: { color: '#fff', fontSize: 46, fontWeight: Typography.black, letterSpacing: -1 },
@@ -316,10 +234,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingVertical: 11, alignSelf: 'flex-start',
   },
   withdrawBtnText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
-
   section: { paddingHorizontal: 16, marginBottom: 20 },
   sectionTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black, marginBottom: 14 },
-
   chart: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     backgroundColor: Colors.surface, borderRadius: Radius.xl,
@@ -330,17 +246,12 @@ const styles = StyleSheet.create({
   barTrack: { flex: 1, width: '100%', backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
   barFill: { width: '100%', borderRadius: 4 },
   barLabel: { color: Colors.textSecondary, fontSize: 10, fontWeight: Typography.semibold },
-
-  txItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.divider,
-  },
+  txItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.divider },
   txIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   txDesc: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.semibold },
   txDate: { color: Colors.textMuted, fontSize: Typography.xs, marginTop: 2 },
   txAmount: { fontSize: Typography.base, fontWeight: Typography.black },
   txStatus: { color: Colors.textMuted, fontSize: Typography.xs, marginTop: 2, textTransform: 'capitalize' },
-
   modal: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#161616', borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -372,7 +283,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface, borderRadius: Radius.md, padding: 12, marginTop: 12,
   },
   paymentNoteText: { color: Colors.textMuted, fontSize: Typography.xs, flex: 1, lineHeight: 17 },
-
   successOverlay: {
     ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)',
     alignItems: 'center', justifyContent: 'center', padding: 32,

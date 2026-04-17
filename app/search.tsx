@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, Pressable, ScrollView,
-  Dimensions, ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,9 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { TRENDING_TAGS, SEARCH_CATEGORIES, FEATURED_SELLERS, FEED_POSTS } from '@/constants/data';
-import { PostService } from '@/services/postService';
-import { ProfileService } from '@/services/profileService';
-import { DbPost, DbProfile } from '@/lib/types';
 import { useApp } from '@/contexts/AppContext';
 
 const { width } = Dimensions.get('window');
@@ -35,32 +32,22 @@ export default function SearchScreen() {
   const { currency } = useApp();
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
-  const [results, setResults] = useState<DbPost[]>([]);
-  const [userResults, setUserResults] = useState<DbProfile[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
 
-  // Debounced search
   useEffect(() => {
-    if (!query.trim()) { setResults([]); setUserResults([]); return; }
-    const timer = setTimeout(() => runSearch(query), 350);
+    if (!query.trim()) { setResults([]); return; }
+    const timer = setTimeout(() => {
+      const q = query.toLowerCase();
+      const filtered = (FEED_POSTS as any[]).filter((p: any) =>
+        (p.seller || '').toLowerCase().includes(q) ||
+        (p.caption || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        (p.hashtags || []).some((h: string) => h.toLowerCase().includes(q))
+      );
+      setResults(filtered);
+    }, 300);
     return () => clearTimeout(timer);
   }, [query]);
-
-  const runSearch = async (q: string) => {
-    setLoading(true);
-    const [posts, users] = await Promise.all([
-      PostService.search(q),
-      ProfileService.search(q),
-    ]);
-    // Fallback to mock if db empty
-    setResults(posts.length > 0 ? posts : FEED_POSTS.filter(p =>
-      p.seller.toLowerCase().includes(q.toLowerCase()) ||
-      p.caption?.toLowerCase().includes(q.toLowerCase()) ||
-      p.hashtags?.some((h: string) => h.toLowerCase().includes(q.toLowerCase()))
-    ) as any);
-    setUserResults(users);
-    setLoading(false);
-  };
 
   const sym = currency.symbol;
 
@@ -136,66 +123,29 @@ export default function SearchScreen() {
           </>
         ) : (
           <View style={styles.results}>
-            {loading ? (
-              <ActivityIndicator color={Colors.pink} style={{ marginTop: 32 }} />
+            <Text style={styles.resultsCount}>
+              {results.length} {results.length === 1 ? 'result' : 'results'} for "{query}"
+            </Text>
+
+            {results.length === 0 ? (
+              <View style={styles.noResults}>
+                <Text style={styles.noResultsEmoji}>🔍</Text>
+                <Text style={styles.noResultsText}>No results found</Text>
+                <Text style={styles.noResultsSub}>Try different keywords or browse categories</Text>
+              </View>
             ) : (
-              <>
-                {/* User results */}
-                {userResults.length > 0 && (
-                  <View style={{ marginBottom: 16 }}>
-                    <Text style={styles.sectionTitle}>Users</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 8 }}>
-                      {userResults.map(u => (
-                        <Pressable key={u.id} style={styles.userResult} onPress={() => router.push('/(tabs)/profile')}>
-                          {u.avatar_url ? (
-                            <Image source={{ uri: u.avatar_url }} style={styles.userResultAvatar} contentFit="cover" />
-                          ) : (
-                            <LinearGradient colors={Gradients.primary} style={styles.userResultAvatarFallback}>
-                              <Text style={{ color: '#fff', fontWeight: Typography.bold }}>
-                                {(u.username || 'U').charAt(0).toUpperCase()}
-                              </Text>
-                            </LinearGradient>
-                          )}
-                          <Text style={styles.userResultName} numberOfLines={1}>@{u.username}</Text>
-                          {u.verified && <MaterialIcons name="verified" size={12} color={Colors.verified} />}
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-
-                <Text style={styles.resultsCount}>
-                  {results.length} {results.length === 1 ? 'result' : 'results'} for "{query}"
-                </Text>
-
-                {results.length === 0 ? (
-                  <View style={styles.noResults}>
-                    <Text style={styles.noResultsEmoji}>🔍</Text>
-                    <Text style={styles.noResultsText}>No results found</Text>
-                    <Text style={styles.noResultsSub}>Try different keywords or browse categories</Text>
-                  </View>
-                ) : (
-                  <View style={styles.resultsGrid}>
-                    {results.map((item: any) => (
-                      <Pressable key={item.id} style={styles.resultCard}
-                        onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}>
-                        <Image source={{ uri: item.image || item.media_urls?.[0] }} style={styles.resultImg} contentFit="cover" />
-                        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.resultGrad}>
-                          <Text style={styles.resultPrice}>{item.price || item.price_text || `${sym}${item.price_num}`}</Text>
-                          <Text style={styles.resultSeller} numberOfLines={1}>
-                            @{item.seller || item.user_profiles?.username}
-                          </Text>
-                        </LinearGradient>
-                        {(item.stockLeft || (item.quantity - item.quantity_sold)) <= 5 && (item.stockLeft || (item.quantity - item.quantity_sold)) > 0 && (
-                          <View style={styles.resultStock}>
-                            <Text style={styles.resultStockText}>Only {item.stockLeft || (item.quantity - item.quantity_sold)} left</Text>
-                          </View>
-                        )}
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-              </>
+              <View style={styles.resultsGrid}>
+                {results.map((item: any) => (
+                  <Pressable key={item.id} style={styles.resultCard}
+                    onPress={() => router.push({ pathname: '/post/[id]', params: { id: item.id } })}>
+                    <Image source={{ uri: item.image || item.media_urls?.[0] }} style={styles.resultImg} contentFit="cover" />
+                    <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.resultGrad}>
+                      <Text style={styles.resultPrice}>{item.price || `${sym}${item.price_num || ''}`}</Text>
+                      <Text style={styles.resultSeller} numberOfLines={1}>@{item.seller}</Text>
+                    </LinearGradient>
+                  </Pressable>
+                ))}
+              </View>
             )}
           </View>
         )}
@@ -236,10 +186,6 @@ const styles = StyleSheet.create({
   verifiedIcon: { position: 'absolute', bottom: 0, right: 0 },
   sellerChipName: { color: Colors.textSecondary, fontSize: Typography.xs, textAlign: 'center' },
   results: { padding: 16, gap: 12 },
-  userResult: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surface, borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 8 },
-  userResultAvatar: { width: 28, height: 28, borderRadius: 14 },
-  userResultAvatarFallback: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  userResultName: { color: '#fff', fontSize: Typography.xs, fontWeight: Typography.semibold, maxWidth: 90 },
   resultsCount: { color: Colors.textSecondary, fontSize: Typography.sm },
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   resultCard: { width: RESULT_IMG, height: RESULT_IMG * 1.3, borderRadius: Radius.lg, overflow: 'hidden', position: 'relative' },
@@ -247,8 +193,6 @@ const styles = StyleSheet.create({
   resultGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 10, gap: 2 },
   resultPrice: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.black },
   resultSeller: { color: Colors.textSecondary, fontSize: Typography.xs },
-  resultStock: { position: 'absolute', top: 8, right: 8, backgroundColor: Colors.orange, borderRadius: Radius.pill, paddingHorizontal: 8, paddingVertical: 3 },
-  resultStockText: { color: '#fff', fontSize: 9, fontWeight: Typography.bold },
   noResults: { alignItems: 'center', paddingVertical: 60, gap: 8 },
   noResultsEmoji: { fontSize: 40 },
   noResultsText: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.bold },

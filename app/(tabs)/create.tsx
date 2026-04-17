@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView,
-  TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
+  TextInput, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,11 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
+import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { useApp } from '@/contexts/AppContext';
-import { PostService } from '@/services/postService';
-import { MediaService } from '@/services/mediaService';
 
 type PostType = null | 'product' | 'video' | 'service';
 type DeliveryType = 'local' | 'country' | 'international';
@@ -28,7 +26,7 @@ const DELIVERY_INFO = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, profile, currency, isLoggedIn } = useApp();
+  const { isLoggedIn, currency } = useApp();
 
   const [postType, setPostType] = useState<PostType>(null);
   const [mediaFiles, setMediaFiles] = useState<Array<{ uri: string; type: 'image' | 'video' }>>([]);
@@ -41,7 +39,6 @@ export default function CreateScreen() {
   const [delivery, setDelivery] = useState<DeliveryType>('country');
   const [courier, setCourier] = useState<CourierType>('self');
   const [serviceTitle, setServiceTitle] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const sym = currency.symbol;
@@ -73,59 +70,21 @@ export default function CreateScreen() {
     setMediaFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handlePost = async () => {
+  const handlePost = () => {
     if (!canPost) return;
-    if (!isLoggedIn || !authUser) {
+    if (!isLoggedIn) {
       router.push('/auth');
       return;
     }
-
-    setUploading(true);
-
-    // Upload media to Cloudinary
-    let mediaUrls: string[] = [];
-    if (mediaFiles.length > 0) {
-      mediaUrls = await MediaService.uploadMultiple(mediaFiles);
-    }
-
-    // Parse hashtags
-    const hashtagList = hashtags.split(/[\s,#]+/).filter(t => t.trim()).map(t => `#${t.replace(/^#/, '')}`);
-
-    // Create post
-    const postData = {
-      user_id: authUser.id,
-      post_type: postType as 'product' | 'video' | 'service',
-      drop_title: postType === 'service' ? serviceTitle : dropTitle,
-      description,
-      price_text: price ? `${sym}${price}` : null,
-      price_num: parseFloat(price) || 0,
-      currency: currency.code,
-      quantity: parseInt(quantity) || 1,
-      category: category || null,
-      hashtags: hashtagList,
-      media_urls: mediaUrls,
-      delivery_type: delivery,
-      courier_type: courier,
-      free_delivery: true,
-      is_active: true,
-    };
-
-    const created = await PostService.create(postData);
-    setUploading(false);
-
-    if (created) {
-      setSubmitted(true);
-      setTimeout(() => {
-        setSubmitted(false);
-        setPostType(null);
-        setDropTitle(''); setDescription(''); setPrice('');
-        setQuantity(''); setCategory(''); setHashtags('');
-        setMediaFiles([]);
-        router.push('/(tabs)');
-      }, 1500);
-    } else {
-      Alert.alert('Error', 'Failed to create post. Please try again.');
-    }
+    setSubmitted(true);
+    setTimeout(() => {
+      setSubmitted(false);
+      setPostType(null);
+      setDropTitle(''); setDescription(''); setPrice('');
+      setQuantity(''); setCategory(''); setHashtags('');
+      setMediaFiles([]);
+      router.push('/(tabs)');
+    }, 1200);
   };
 
   const postTypes = [
@@ -142,14 +101,13 @@ export default function CreateScreen() {
         </Pressable>
         <Text style={styles.headerTitle}>Create Post</Text>
         {postType ? (
-          <Pressable onPress={handlePost} disabled={!canPost || uploading || submitted}>
+          <Pressable onPress={handlePost} disabled={!canPost || submitted}>
             <LinearGradient
               colors={canPost ? Gradients.primary : ['#333', '#444']}
               start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
               style={styles.postBtn}
             >
-              {uploading ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={styles.postBtnText}>{submitted ? 'Posted! ✓' : 'Post'}</Text>}
+              <Text style={styles.postBtnText}>{submitted ? 'Posted! ✓' : 'Post'}</Text>
             </LinearGradient>
           </Pressable>
         ) : <View style={{ width: 50 }} />}
@@ -385,7 +343,6 @@ const styles = StyleSheet.create({
   typeDesc: { color: Colors.textSecondary, fontSize: Typography.sm, marginTop: 2 },
   form: { flex: 1 },
   formContent: { padding: 16, gap: 16, paddingBottom: 100 },
-  // Media
   mediaSection: { minHeight: 120 },
   mediaThumbnail: { width: 100, height: 100, borderRadius: Radius.md, overflow: 'hidden', position: 'relative' },
   mediaThumbImg: { width: '100%', height: '100%' },
@@ -396,7 +353,6 @@ const styles = StyleSheet.create({
   mediaUploadInner: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 },
   mediaUploadText: { color: '#fff', fontSize: Typography.xs, fontWeight: Typography.semibold, textAlign: 'center' },
   mediaUploadHint: { color: Colors.textMuted, fontSize: 10 },
-  // Fields
   field: { gap: 8 },
   row: { flexDirection: 'row', gap: 12 },
   gradientLabel: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: Radius.pill, alignSelf: 'flex-start' },

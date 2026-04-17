@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, FlatList, ScrollView,
-  ActivityIndicator,
+  View, Text, StyleSheet, Pressable, ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,55 +9,36 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { PostService } from '@/services/postService';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { PROFILE_POSTS } from '@/constants/data';
-import { DbPost } from '@/lib/types';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, profile, logout, currency } = useApp();
-  const [posts, setPosts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { user, logout, currency } = useApp();
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
 
-  useEffect(() => {
-    loadPosts();
-  }, [authUser]);
-
-  const loadPosts = async () => {
-    setLoading(true);
-    if (authUser) {
-      const data = await PostService.getByUser(authUser.id);
-      setPosts(data.length > 0 ? data : PROFILE_POSTS);
-    } else {
-      setPosts(PROFILE_POSTS);
-    }
-    setLoading(false);
-  };
-
-  const handleLogout = async () => {
-    await logout();
+  const handleLogout = () => {
+    logout();
     router.replace('/auth');
   };
 
   const sym = currency.symbol;
 
-  const displayProfile = profile || {
+  const displayProfile = user || {
     username: 'the_joystreet_shop',
-    display_name: 'Joy Street',
-    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face',
-    country: 'Zambia',
+    displayName: 'Joy Street',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face',
+    location: 'Zambia',
     bio: 'Fashion drops weekly 🔥 Fast shipping | Authentic only',
     verified: true,
-    followers_count: 15900,
-    following_count: 610,
-    posts_count: posts.length || 6,
-    sold_count: 186,
+    followers: 15900,
+    following: 610,
+    posts: 6,
+    sold: 186,
     rating: 4.6,
-    is_seller: true,
-    wallet_balance: 4850,
+    isSeller: true,
+    walletBalance: 4850,
   };
 
   return (
@@ -72,18 +52,16 @@ export default function ProfileScreen() {
               <MaterialIcons name="verified" size={16} color={Colors.verified} />
             )}
           </View>
-          <View style={styles.headerActions}>
-            <Pressable onPress={() => router.push('/menu')} hitSlop={8}>
-              <Ionicons name="menu-outline" size={26} color="#fff" />
-            </Pressable>
-          </View>
+          <Pressable onPress={() => router.push('/menu')} hitSlop={8}>
+            <Ionicons name="menu-outline" size={26} color="#fff" />
+          </Pressable>
         </View>
 
         {/* Avatar + Stats */}
         <View style={styles.profileRow}>
           <View style={styles.avatarWrap}>
-            {displayProfile.avatar_url ? (
-              <Image source={{ uri: displayProfile.avatar_url }} style={styles.avatar} contentFit="cover" />
+            {displayProfile.avatar ? (
+              <Image source={{ uri: displayProfile.avatar }} style={styles.avatar} contentFit="cover" />
             ) : (
               <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
                 <Text style={styles.avatarFallbackText}>
@@ -98,13 +76,12 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          {/* Stats */}
           <View style={styles.stats}>
             {[
-              { label: 'Posts', value: displayProfile.posts_count },
-              { label: 'Followers', value: formatCount(displayProfile.followers_count) },
-              { label: 'Following', value: formatCount(displayProfile.following_count) },
-              { label: 'Sold', value: displayProfile.sold_count },
+              { label: 'Posts', value: displayProfile.posts || PROFILE_POSTS.length },
+              { label: 'Followers', value: formatCount(displayProfile.followers || 0) },
+              { label: 'Following', value: formatCount(displayProfile.following || 0) },
+              { label: 'Sold', value: displayProfile.sold || 0 },
             ].map(s => (
               <View key={s.label} style={styles.stat}>
                 <Text style={styles.statValue}>{s.value}</Text>
@@ -116,16 +93,16 @@ export default function ProfileScreen() {
 
         {/* Bio */}
         <View style={styles.bioSection}>
-          <Text style={styles.displayName}>{displayProfile.display_name || displayProfile.username}</Text>
+          <Text style={styles.displayName}>{displayProfile.displayName || displayProfile.username}</Text>
           {displayProfile.bio ? <Text style={styles.bio}>{displayProfile.bio}</Text> : null}
-          {displayProfile.country ? (
+          {displayProfile.location ? (
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
-              <Text style={styles.location}>{displayProfile.country}</Text>
+              <Text style={styles.location}>{displayProfile.location}</Text>
             </View>
           ) : null}
 
-          {displayProfile.is_seller && (
+          {displayProfile.isSeller && (
             <View style={styles.sellerBadgeRow}>
               <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.sellerBadge}>
                 <Ionicons name="storefront-outline" size={13} color="#fff" />
@@ -133,7 +110,7 @@ export default function ProfileScreen() {
               </LinearGradient>
               <View style={styles.ratingPill}>
                 <Ionicons name="star" size={12} color={Colors.gold} />
-                <Text style={styles.ratingText}>{displayProfile.rating?.toFixed(1)}</Text>
+                <Text style={styles.ratingText}>{(displayProfile.rating || 4.5).toFixed(1)}</Text>
               </View>
             </View>
           )}
@@ -141,13 +118,10 @@ export default function ProfileScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionRow}>
-          <Pressable
-            style={styles.editBtn}
-            onPress={() => router.push('/menu')}
-          >
+          <Pressable style={styles.editBtn} onPress={() => router.push('/menu')}>
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </Pressable>
-          {displayProfile.is_seller && (
+          {displayProfile.isSeller && (
             <Pressable onPress={() => router.push('/seller-dashboard')} style={styles.dashBtn}>
               <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.dashBtnGrad}>
                 <Ionicons name="storefront-outline" size={15} color="#fff" />
@@ -161,13 +135,13 @@ export default function ProfileScreen() {
         </View>
 
         {/* Seller wallet preview */}
-        {displayProfile.is_seller && (
+        {displayProfile.isSeller && (
           <Pressable onPress={() => router.push('/wallet')} style={styles.walletCard}>
             <View style={styles.walletCardLeft}>
               <Ionicons name="wallet" size={18} color={Colors.pink} />
               <View>
                 <Text style={styles.walletCardLabel}>Wallet Balance</Text>
-                <Text style={styles.walletCardValue}>{sym}{(displayProfile.wallet_balance || 0).toLocaleString()}</Text>
+                <Text style={styles.walletCardValue}>{sym}{(displayProfile.walletBalance || 0).toLocaleString()}</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
@@ -185,32 +159,28 @@ export default function ProfileScreen() {
         </View>
 
         {/* Grid */}
-        {loading ? (
-          <ActivityIndicator color={Colors.pink} style={{ marginTop: 32 }} />
-        ) : (
-          <View style={styles.grid}>
-            {posts.map((post: any) => (
-              <Pressable
-                key={post.id}
-                style={styles.gridItem}
-                onPress={() => router.push(`/post/${post.id}`)}
-              >
-                <Image
-                  source={{ uri: post.image || post.media_urls?.[0] }}
-                  style={styles.gridImg}
-                  contentFit="cover"
-                />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
-                  <Text style={styles.gridPrice}>{post.price || post.price_text || `${sym}${post.price_num}`}</Text>
-                  <View style={styles.gridLikes}>
-                    <Ionicons name="heart" size={11} color="#fff" />
-                    <Text style={styles.gridLikesText}>{formatCount(post.likes || post.likes_count || 0)}</Text>
-                  </View>
-                </LinearGradient>
-              </Pressable>
-            ))}
-          </View>
-        )}
+        <View style={styles.grid}>
+          {PROFILE_POSTS.map((post: any) => (
+            <Pressable
+              key={post.id}
+              style={styles.gridItem}
+              onPress={() => router.push(`/post/${post.id}`)}
+            >
+              <Image
+                source={{ uri: post.image || post.media_urls?.[0] }}
+                style={styles.gridImg}
+                contentFit="cover"
+              />
+              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
+                <Text style={styles.gridPrice}>{post.price || `${sym}${post.price_num || ''}`}</Text>
+                <View style={styles.gridLikes}>
+                  <Ionicons name="heart" size={11} color="#fff" />
+                  <Text style={styles.gridLikesText}>{formatCount(post.likes || 0)}</Text>
+                </View>
+              </LinearGradient>
+            </Pressable>
+          ))}
+        </View>
       </ScrollView>
 
       <BottomTabBar />
@@ -224,7 +194,6 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-const GRID_SIZE = 3;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
@@ -233,7 +202,6 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   username: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
-  headerActions: { flexDirection: 'row', gap: 12 },
   profileRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 20, marginBottom: 14 },
   avatarWrap: { position: 'relative' },
   avatar: { width: 82, height: 82, borderRadius: 41, borderWidth: 2.5, borderColor: Colors.pink },
@@ -288,8 +256,7 @@ const styles = StyleSheet.create({
   walletCardValue: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
   tabRow: {
     flexDirection: 'row', borderTopWidth: 1, borderTopColor: Colors.border,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
-    marginBottom: 1,
+    borderBottomWidth: 1, borderBottomColor: Colors.border, marginBottom: 1,
   },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 13 },
   tabActive: { borderBottomWidth: 2, borderBottomColor: Colors.pink },

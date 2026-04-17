@@ -1,16 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
+  View, Text, StyleSheet, Pressable, FlatList,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
+import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { NotificationService } from '@/services/notificationService';
-import { DbNotification } from '@/lib/types';
 import { NOTIFICATIONS_DATA } from '@/constants/data';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 
@@ -45,100 +43,59 @@ function NotifItem({ item, onPress }: { item: any; onPress: () => void }) {
       <View style={styles.content}>
         <Text style={styles.title}>{item.title}</Text>
         <Text style={styles.body} numberOfLines={2}>{item.body}</Text>
-        <Text style={styles.time}>{item.time || formatTime(item.created_at)}</Text>
+        <Text style={styles.time}>{item.time || ''}</Text>
       </View>
       {!item.read && <View style={styles.unreadDot} />}
     </Pressable>
   );
 }
 
-function formatTime(ts: string | undefined): string {
-  if (!ts) return '';
-  const d = new Date(ts);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 export default function AlertsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, notifCount, refreshNotifCount } = useApp();
-  const [notifs, setNotifs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { notifCount, refreshNotifCount } = useApp();
+  const [notifs, setNotifs] = useState<any[]>(NOTIFICATIONS_DATA);
 
-  const load = async () => {
-    setLoading(true);
-    if (authUser) {
-      const data = await NotificationService.getForUser(authUser.id);
-      setNotifs(data.length > 0 ? data : NOTIFICATIONS_DATA);
-    } else {
-      setNotifs(NOTIFICATIONS_DATA);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [authUser]);
-
-  const markAllRead = async () => {
-    if (authUser) {
-      await NotificationService.markAllRead(authUser.id);
-      await refreshNotifCount();
-    }
+  const markAllRead = () => {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    refreshNotifCount();
   };
 
-  const handleNotifPress = async (notif: any) => {
-    if (authUser && !notif.read) {
-      await NotificationService.markRead(notif.id);
-      await refreshNotifCount();
-      setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    }
-    // Navigate based on type
+  const handleNotifPress = (notif: any) => {
+    setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
     if (notif.type === 'order') router.push('/order-tracking');
     else if (notif.type === 'message') router.push('/chat');
-    else if (notif.related_type === 'post' && notif.related_id) router.push(`/post/${notif.related_id}`);
   };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Notifications</Text>
-        {notifCount > 0 && (
+        {notifs.some(n => !n.read) && (
           <Pressable onPress={markAllRead} style={styles.markAllBtn} hitSlop={8}>
             <Text style={styles.markAllText}>Mark all read</Text>
           </Pressable>
         )}
       </View>
 
-      {loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={Colors.pink} size="large" />
-        </View>
-      ) : (
-        <FlatList
-          data={notifs}
-          keyExtractor={item => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}
-          renderItem={({ item }) => (
-            <NotifItem item={item} onPress={() => handleNotifPress(item)} />
-          )}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <LinearGradient colors={Gradients.primary} style={styles.emptyIcon}>
-                <Ionicons name="notifications-outline" size={32} color="#fff" />
-              </LinearGradient>
-              <Text style={styles.emptyTitle}>All caught up!</Text>
-              <Text style={styles.emptySubtitle}>No new notifications</Text>
-            </View>
-          }
-        />
-      )}
+      <FlatList
+        data={notifs}
+        keyExtractor={item => item.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}
+        renderItem={({ item }) => (
+          <NotifItem item={item} onPress={() => handleNotifPress(item)} />
+        )}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <LinearGradient colors={Gradients.primary} style={styles.emptyIcon}>
+              <Ionicons name="notifications-outline" size={32} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.emptyTitle}>All caught up!</Text>
+            <Text style={styles.emptySubtitle}>No new notifications</Text>
+          </View>
+        }
+      />
       <BottomTabBar />
     </View>
   );
@@ -154,7 +111,6 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
   markAllBtn: { paddingVertical: 6, paddingHorizontal: 10 },
   markAllText: { color: Colors.pink, fontSize: Typography.sm, fontWeight: Typography.semibold },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   item: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,

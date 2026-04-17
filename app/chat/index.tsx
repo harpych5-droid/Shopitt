@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, TextInput,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,9 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
-import { useApp } from '@/contexts/AppContext';
-import { ChatService } from '@/services/chatService';
-import { DbConversation } from '@/lib/types';
 import { CHAT_LIST } from '@/constants/data';
 
 function formatTime(ts: string | undefined): string {
@@ -30,42 +26,14 @@ function formatTime(ts: string | undefined): string {
 export default function ChatListScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, profile } = useApp();
-  const [convos, setConvos] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    loadConversations();
-  }, [authUser]);
-
-  const loadConversations = async () => {
-    setLoading(true);
-    if (authUser) {
-      const data = await ChatService.getConversations(authUser.id);
-      setConvos(data.length > 0 ? data : CHAT_LIST);
-    } else {
-      setConvos(CHAT_LIST);
-    }
-    setLoading(false);
-  };
-
   const filtered = search.trim()
-    ? convos.filter(c => {
-        const name = c.other_user?.username || c.username || '';
-        return name.toLowerCase().includes(search.toLowerCase());
-      })
-    : convos;
-
-  const openConversation = (item: any) => {
-    const convoId = item.id;
-    const otherUserId = item.other_user?.id || item.id;
-    router.push(`/chat/${convoId}?otherUser=${item.other_user?.username || item.username}`);
-  };
+    ? CHAT_LIST.filter(c => (c.username || '').toLowerCase().includes(search.toLowerCase()))
+    : CHAT_LIST;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -76,7 +44,6 @@ export default function ChatListScreen() {
         </Pressable>
       </View>
 
-      {/* Search */}
       <View style={styles.searchWrap}>
         <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
         <TextInput
@@ -88,62 +55,56 @@ export default function ChatListScreen() {
         />
       </View>
 
-      {loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={Colors.pink} size="large" />
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={item => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-          renderItem={({ item }) => {
-            const username = item.other_user?.username || item.username || 'User';
-            const avatar = item.other_user?.avatar_url || item.avatar;
-            const lastMsg = item.last_message || item.lastMessage || '';
-            const time = item.last_message_at ? formatTime(item.last_message_at) : (item.time || '');
-            const unread = item.unread_1 || item.unread_2 || item.unread || 0;
-            const online = item.online || false;
-            return (
-              <Pressable onPress={() => openConversation(item)} style={styles.convoItem}>
-                <View style={styles.avatarWrap}>
-                  {avatar ? (
-                    <Image source={{ uri: avatar }} style={styles.avatar} contentFit="cover" />
-                  ) : (
-                    <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
-                      <Text style={styles.avatarFallbackText}>{username.charAt(0).toUpperCase()}</Text>
-                    </LinearGradient>
+      <FlatList
+        data={filtered}
+        keyExtractor={item => item.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        renderItem={({ item }) => {
+          const username = item.username || 'User';
+          const avatar = item.avatar;
+          const lastMsg = item.lastMessage || '';
+          const time = item.time || '';
+          const unread = item.unread || 0;
+          const online = item.online || false;
+          return (
+            <Pressable onPress={() => router.push(`/chat/${item.id}?otherUser=${username}`)} style={styles.convoItem}>
+              <View style={styles.avatarWrap}>
+                {avatar ? (
+                  <Image source={{ uri: avatar }} style={styles.avatar} contentFit="cover" />
+                ) : (
+                  <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
+                    <Text style={styles.avatarFallbackText}>{username.charAt(0).toUpperCase()}</Text>
+                  </LinearGradient>
+                )}
+                {online && <View style={styles.onlineDot} />}
+              </View>
+              <View style={styles.convoInfo}>
+                <View style={styles.convoTop}>
+                  <Text style={styles.convoName}>@{username}</Text>
+                  <Text style={styles.convoTime}>{time}</Text>
+                </View>
+                <View style={styles.convoBottom}>
+                  <Text style={[styles.convoMsg, unread > 0 && styles.convoMsgUnread]} numberOfLines={1}>
+                    {lastMsg}
+                  </Text>
+                  {unread > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{unread}</Text>
+                    </View>
                   )}
-                  {online && <View style={styles.onlineDot} />}
                 </View>
-                <View style={styles.convoInfo}>
-                  <View style={styles.convoTop}>
-                    <Text style={styles.convoName}>@{username}</Text>
-                    <Text style={styles.convoTime}>{time}</Text>
-                  </View>
-                  <View style={styles.convoBottom}>
-                    <Text style={[styles.convoMsg, unread > 0 && styles.convoMsgUnread]} numberOfLines={1}>
-                      {lastMsg}
-                    </Text>
-                    {unread > 0 && (
-                      <View style={styles.unreadBadge}>
-                        <Text style={styles.unreadText}>{unread}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </Pressable>
-            );
-          }}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="chatbubbles-outline" size={40} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>No conversations yet</Text>
-            </View>
-          }
-        />
-      )}
+              </View>
+            </Pressable>
+          );
+        }}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Ionicons name="chatbubbles-outline" size={40} color={Colors.textMuted} />
+            <Text style={styles.emptyText}>No conversations yet</Text>
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -164,7 +125,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   searchInput: { flex: 1, color: '#fff', fontSize: Typography.base },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   convoItem: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,

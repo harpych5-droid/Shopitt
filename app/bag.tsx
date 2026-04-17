@@ -1,8 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView, Animated,
-  TextInput, Dimensions, KeyboardAvoidingView, Platform,
-  ActivityIndicator,
+  Dimensions, KeyboardAvoidingView, Platform, TextInput,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,7 +11,6 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
 import { CountryPicker } from '@/components/ui/CountryPicker';
-import { OrderService } from '@/services/orderService';
 
 const { width } = Dimensions.get('window');
 
@@ -70,9 +68,12 @@ function FieldInput({ label, placeholder, value, onChangeText, keyboardType, mul
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         style={[styles.fieldInput, multiline && styles.multilineInput]}
-        placeholder={placeholder} placeholderTextColor={Colors.textMuted}
-        value={value} onChangeText={onChangeText}
-        keyboardType={keyboardType || 'default'} multiline={multiline}
+        placeholder={placeholder}
+        placeholderTextColor={Colors.textMuted}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType || 'default'}
+        multiline={multiline}
         numberOfLines={multiline ? 3 : 1}
       />
     </View>
@@ -90,11 +91,10 @@ const ORDER_STEPS = [
 export default function BagScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, authUser, profile, currency } = useApp();
+  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, currency } = useApp();
   const sym = currency.symbol;
 
   const [savedAddress, setSavedAddress] = useState<AddressData | null>(null);
-  const [showAddressForm, setShowAddressForm] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'address' | 'payment'>('address');
   const [payMethod, setPayMethod] = useState<'mobilemoney' | 'card' | 'delivery'>('mobilemoney');
@@ -118,64 +118,23 @@ export default function BagScreen() {
     setCheckoutStep('payment');
   };
 
-  const placeOrder = async () => {
+  const placeOrder = () => {
     if (!savedAddress) return;
     setPlacing(true);
-
-    // Group items by seller
-    const sellerMap: Record<string, typeof bagItems> = {};
-    for (const item of bagItems) {
-      const sid = item.sellerId || 'unknown';
-      if (!sellerMap[sid]) sellerMap[sid] = [];
-      sellerMap[sid].push(item);
-    }
-
-    // Create one order per seller
-    if (authUser) {
-      for (const [sellerId, items] of Object.entries(sellerMap)) {
-        const orderItems = items.map(i => ({
-          post_id: i.postId,
-          title: i.product,
-          image: i.image,
-          price: i.priceNum,
-          currency: i.currency || currency.code,
-          quantity: i.quantity,
-        }));
-        const subtotal = items.reduce((s, i) => s + i.priceNum * i.quantity, 0);
-
-        await OrderService.create({
-          buyerId: authUser.id,
-          sellerId,
-          postId: items[0].postId,
-          items: orderItems,
-          deliveryAddress: {
-            full_name: savedAddress.fullName,
-            phone: savedAddress.phone,
-            country: savedAddress.country,
-            city: savedAddress.city,
-            address: savedAddress.address,
-            notes: savedAddress.notes,
-          },
-          paymentMethod: payMethod,
-          subtotal,
-          total: subtotal,
-          currency: currency.code,
-          deliveryType: 'country',
-        });
-      }
-    }
-
-    setPlacing(false);
-    Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start();
-    setSuccess(true);
-    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+    // Insert payment gateway API here
     setTimeout(() => {
-      clearBag();
-      setSuccess(false);
-      successScale.setValue(0);
-      setShowCheckout(false);
-      router.push('/(tabs)');
-    }, 3000);
+      setPlacing(false);
+      Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start();
+      setSuccess(true);
+      Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+      setTimeout(() => {
+        clearBag();
+        setSuccess(false);
+        successScale.setValue(0);
+        setShowCheckout(false);
+        router.push('/(tabs)');
+      }, 3000);
+    }, 1200);
   };
 
   const PAY_METHODS = [
@@ -279,7 +238,6 @@ export default function BagScreen() {
         </>
       )}
 
-      {/* CHECKOUT PANEL */}
       {showCheckout && (
         <Animated.View style={[styles.checkoutPanel, { transform: [{ translateY: checkoutY }] }]}>
           <View style={styles.panelHandle} />
@@ -346,10 +304,7 @@ export default function BagScreen() {
 
               <Pressable onPress={placeOrder} disabled={placing}>
                 <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={[styles.placeOrderBtn, Shadow.glow]}>
-                  {placing
-                    ? <ActivityIndicator color="#fff" />
-                    : <Text style={styles.placeOrderText}>Place Order — {sym}{bagTotal.toLocaleString()}</Text>
-                  }
+                  <Text style={styles.placeOrderText}>{placing ? 'Placing...' : `Place Order — ${sym}${bagTotal.toLocaleString()}`}</Text>
                 </LinearGradient>
               </Pressable>
               <View style={{ height: 32 }} />
@@ -358,7 +313,6 @@ export default function BagScreen() {
         </Animated.View>
       )}
 
-      {/* SUCCESS OVERLAY */}
       {success && (
         <View style={styles.successOverlay}>
           <Animated.View style={[styles.successCard, { transform: [{ scale: successScale }] }]}>
@@ -375,7 +329,7 @@ export default function BagScreen() {
                 </Text>
               </View>
             )}
-            {ORDER_STEPS.map((step, i) => (
+            {ORDER_STEPS.map((step) => (
               <View key={step.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' }}>
                 <View style={[styles.tDot, step.done && styles.tDotDone]}>
                   <Ionicons name={step.icon as any} size={13} color={step.done ? '#fff' : Colors.textMuted} />
@@ -461,8 +415,7 @@ const styles = StyleSheet.create({
   addressMini: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 10,
     backgroundColor: Colors.surface, borderRadius: Radius.lg,
-    padding: 12, marginBottom: 8,
-    borderWidth: 1.5, borderColor: 'rgba(255,77,166,0.3)',
+    padding: 12, marginBottom: 8, borderWidth: 1.5, borderColor: 'rgba(255,77,166,0.3)',
   },
   addressMiniName: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
   addressMiniAddr: { color: Colors.textSecondary, fontSize: Typography.xs, marginTop: 2 },
@@ -492,7 +445,6 @@ const styles = StyleSheet.create({
   checkoutTotalValue: { color: Colors.pink, fontSize: Typography.lg, fontWeight: Typography.black },
   placeOrderBtn: { borderRadius: Radius.pill, paddingVertical: 16, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
   placeOrderText: { color: '#fff', fontSize: Typography.md, fontWeight: Typography.bold },
-  // Address form
   addressScroll: { maxHeight: 480 },
   addressContent: { gap: 14, paddingBottom: 20 },
   addressHeader: { marginBottom: 4 },
@@ -502,16 +454,16 @@ const styles = StyleSheet.create({
   fieldLabel: { color: Colors.textSecondary, fontSize: Typography.sm, fontWeight: Typography.medium },
   fieldInput: {
     backgroundColor: Colors.surfaceElevated, borderRadius: Radius.md,
-    borderWidth: 1, borderColor: Colors.border, color: '#fff', fontSize: Typography.base,
+    borderWidth: 1, borderColor: Colors.border,
+    color: '#fff', fontSize: Typography.base,
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  multilineInput: { minHeight: 70, textAlignVertical: 'top' },
+  multilineInput: { minHeight: 70, textAlignVertical: 'top' as const },
   addressBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cancelBtn: { flex: 1, borderRadius: Radius.pill, borderWidth: 1.5, borderColor: Colors.border, paddingVertical: 14, alignItems: 'center' },
   cancelBtnText: { color: Colors.textSecondary, fontSize: Typography.base, fontWeight: Typography.semibold },
   saveAddrBtn: { borderRadius: Radius.pill, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   saveAddrBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  // Success
   successOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   successCard: {
     backgroundColor: Colors.surface, borderRadius: 24, padding: 28, alignItems: 'center', gap: 12,
