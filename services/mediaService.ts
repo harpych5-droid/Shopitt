@@ -2,8 +2,10 @@
 // cloud_name: ddyzz3hho
 // upload_preset: shopitt_preset (unsigned)
 
-const CLOUDINARY_CLOUD = 'ddyzz3hho';
-const CLOUDINARY_UPLOAD_PRESET = 'shopitt_preset';
+const CLOUDINARY_CLOUD =
+  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD ?? 'ddyzz3hho';
+const CLOUDINARY_UPLOAD_PRESET =
+  process.env.EXPO_PUBLIC_CLOUDINARY_PRESET ?? 'shopitt_preset';
 const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/upload`;
 
 export interface UploadResult {
