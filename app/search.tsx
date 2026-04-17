@@ -11,8 +11,6 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { TRENDING_TAGS, SEARCH_CATEGORIES, FEATURED_SELLERS, FEED_POSTS } from '@/constants/data';
 import { useApp } from '@/contexts/AppContext';
-import { PostService } from '@/services/postService';
-import { ProfileService } from '@/services/profileService';
 
 const { width } = Dimensions.get('window');
 const RESULT_IMG = (width - 48) / 2;
@@ -35,36 +33,21 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<any[]>([]);
-  const [sellers, setSellers] = useState<any[]>(FEATURED_SELLERS);
+  const [sellers] = useState<any[]>(FEATURED_SELLERS);
   const [searching, setSearching] = useState(false);
-
-  // Load featured sellers from Supabase
-  useEffect(() => {
-    ProfileService.getFeaturedSellers(10).then(({ data }) => {
-      if (data.length > 0) setSellers(data.map(s => ({ id: s.id, username: s.username, avatar: s.avatar_url, verified: s.verified })));
-    });
-  }, []);
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return; }
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       setSearching(true);
-
-      // Search Supabase posts + fallback to mock
-      const { data, error } = await PostService.search(query);
-      if (!error && data.length > 0) {
-        setResults(data);
-      } else {
-        // Fallback to local mock search
-        const q = query.toLowerCase();
-        const filtered = (FEED_POSTS as any[]).filter((p: any) =>
-          (p.seller || '').toLowerCase().includes(q) ||
-          (p.caption || '').toLowerCase().includes(q) ||
-          (p.category || '').toLowerCase().includes(q) ||
-          (p.hashtags || []).some((h: string) => h.toLowerCase().includes(q))
-        );
-        setResults(filtered);
-      }
+      const q = query.toLowerCase();
+      const filtered = (FEED_POSTS as any[]).filter((p: any) =>
+        (p.seller || '').toLowerCase().includes(q) ||
+        (p.caption || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        (p.hashtags || []).some((h: string) => h.toLowerCase().includes(q))
+      );
+      setResults(filtered);
       setSearching(false);
     }, 300);
     return () => clearTimeout(timer);

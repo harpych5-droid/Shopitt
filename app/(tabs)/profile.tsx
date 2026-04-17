@@ -9,14 +9,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { PostService } from '@/services/postService';
-import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { PROFILE_POSTS } from '@/constants/data';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, logout, currency, authUser } = useApp();
+  const { currency } = useApp();
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
   const [userPosts, setUserPosts] = useState<any[]>([]);
   const [savedPosts, setSavedPosts] = useState<any[]>([]);
@@ -24,32 +22,9 @@ export default function ProfileScreen() {
   const sym = currency.symbol;
 
   useEffect(() => {
-    loadPosts();
-  }, [authUser]);
-
-  const loadPosts = async () => {
-    setPostsLoading(true);
-    if (authUser) {
-      const [postsRes, savedRes] = await Promise.all([
-        PostService.getUserPosts(authUser.id),
-        PostService.getSavedPosts(authUser.id),
-      ]);
-      if (!postsRes.error && postsRes.data.length > 0) {
-        setUserPosts(postsRes.data);
-      } else {
-        setUserPosts(PROFILE_POSTS as any[]);
-      }
-      if (!savedRes.error) setSavedPosts(savedRes.data);
-    } else {
-      setUserPosts(PROFILE_POSTS as any[]);
-    }
+    setUserPosts(PROFILE_POSTS as any[]);
     setPostsLoading(false);
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    router.replace('/auth');
-  };
+  }, []);
 
   const displayProfile = user ?? {
     username: 'the_joystreet_shop',
@@ -139,7 +114,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.actionRow}>
-          <Pressable style={styles.editBtn} onPress={() => router.push('/menu')}>
+          <Pressable style={styles.editBtn} onPress={() => router.push('/menu' as any)}>
             <Text style={styles.editBtnText}>Edit Profile</Text>
           </Pressable>
           {displayProfile.is_seller && (

@@ -10,9 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { OrderService } from '@/services/orderService';
-import { WalletService } from '@/services/walletService';
-import { PostService } from '@/services/postService';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { SELLER_ORDERS, REVENUE_DATA } from '@/constants/data';
 
@@ -44,7 +41,7 @@ const STATUS_MAP: Record<string, string> = {
 export default function SellerDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authUser, currency, user } = useApp();
+  const { currency } = useApp();
   const [orders, setOrders] = useState<any[]>([]);
   const [revenueData, setRevenueData] = useState(REVENUE_DATA);
   const [totalRevenue, setTotalRevenue] = useState(0);
@@ -54,50 +51,14 @@ export default function SellerDashboardScreen() {
   const sym = currency.symbol;
 
   useEffect(() => {
-    loadDashboard();
-  }, [authUser]);
-
-  const loadDashboard = async () => {
-    setLoading(true);
-    if (authUser) {
-      const [ordersRes, revenueRes, weeklyRes, balanceRes] = await Promise.all([
-        OrderService.getSellerOrders(authUser.id),
-        OrderService.getSellerRevenue(authUser.id),
-        WalletService.getWeeklyRevenue(authUser.id),
-        WalletService.getBalance(authUser.id),
-      ]);
-
-      if (!ordersRes.error && ordersRes.data.length > 0) {
-        setOrders(ordersRes.data.map(o => ({
-          ...o,
-          buyer: o.buyer?.username ?? 'Buyer',
-          buyerAvatar: (o.buyer as any)?.avatar_url,
-          product: (o.post as any)?.drop_title ?? 'Product',
-          total: o.total,
-          location: (o.delivery_address as any)?.city + ', ' + (o.delivery_address as any)?.country || 'Unknown',
-          time: new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isNew: o.status === 'new',
-        })));
-      } else {
-        setOrders(SELLER_ORDERS.map((o: any) => ({ ...o, total: parseFloat(String(o.total).replace(/[^0-9.]/g, '')) || 0 })));
-      }
-
-      if (revenueRes) setTotalRevenue(revenueRes.total);
-      if (weeklyRes.some(d => d.value > 0)) setRevenueData(weeklyRes);
-      setWalletBalance(balanceRes);
-    } else {
-      setOrders(SELLER_ORDERS.map((o: any) => ({ ...o, total: parseFloat(String(o.total).replace(/[^0-9.]/g, '')) || 0 })));
-    }
+    setOrders(SELLER_ORDERS.map((o: any) => ({ ...o, total: parseFloat(String(o.total).replace(/[^0-9.]/g, '')) || 0 })));
     setLoading(false);
-  };
+  }, []);
 
-  const handleStatusUpdate = async (orderId: string, currentStatus: string) => {
+  const handleStatusUpdate = (orderId: string, currentStatus: string) => {
     const next = STATUS_MAP[currentStatus] as any;
     if (!next) return;
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: next } : o));
-    if (authUser) {
-      await OrderService.updateOrderStatus(orderId, next, authUser.id);
-    }
   };
 
   const filtered = filter === 'all' ? orders : orders.filter(o => o.status === filter);

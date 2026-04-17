@@ -8,9 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
-import { useApp } from '@/contexts/AppContext';
-import { ChatService } from '@/services/chatService';
-import type { DBMessage } from '@/lib/types';
 
 const MOCK_MSGS: DBMessage[] = [
   { id: 'm1', conversation_id: 'demo', sender_id: 'other', text: 'Hey! Is this still available?', read: true, created_at: new Date(Date.now() - 120000).toISOString() },
@@ -22,90 +19,31 @@ export default function ConversationScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, otherUser } = useLocalSearchParams<{ id: string; otherUser?: string }>();
-  const { authUser } = useApp();
-  const [messages, setMessages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<any[]>(MOCK_MSGS);
+  const [loading] = useState(false);
   const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
   const flatRef = useRef<FlatList>(null);
-  const channelRef = useRef<any>(null);
 
-  const conversationId = id;
-  const isDemoConvo = !id || id.startsWith('c');
-
-  useEffect(() => {
-    loadMessages();
-    return () => {
-      channelRef.current?.unsubscribe();
-    };
-  }, [conversationId]);
-
-  const loadMessages = async () => {
-    setLoading(true);
-    if (!isDemoConvo && authUser) {
-      const { data, error } = await ChatService.getMessages(conversationId);
-      if (!error && data.length > 0) {
-        setMessages(data);
-        await ChatService.markRead(conversationId, authUser.id);
-      } else {
-        setMessages(MOCK_MSGS);
-      }
-
-      // Subscribe to real-time messages
-      channelRef.current = ChatService.subscribeToMessages(conversationId, (msg) => {
-        setMessages(prev => [...prev, msg]);
-        setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
-      });
-    } else {
-      setMessages(MOCK_MSGS);
-    }
-    setLoading(false);
-    setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 200);
-  };
-
-  const handleSend = async () => {
+  const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed) return;
     setText('');
-
-    if (!isDemoConvo && authUser) {
-      setSending(true);
-      const optimistic: any = {
-        id: `opt_${Date.now()}`,
-        conversation_id: conversationId,
-        sender_id: authUser.id,
-        text: trimmed,
-        read: false,
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, optimistic]);
-      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
-
-      const { data, error } = await ChatService.sendMessage(conversationId, authUser.id, trimmed);
-      if (data) {
-        setMessages(prev => prev.map(m => m.id === optimistic.id ? data : m));
-      }
-      setSending(false);
-    } else {
-      // Demo mode
-      const newMsg: any = {
-        id: `m${Date.now()}`,
-        conversation_id: 'demo',
-        sender_id: authUser?.id ?? 'me',
-        text: trimmed,
-        read: false,
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, newMsg]);
-      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
-    }
+    const newMsg: any = {
+      id: `m${Date.now()}`,
+      conversation_id: id || 'demo',
+      sender_id: 'me',
+      text: trimmed,
+      read: false,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, newMsg]);
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   const formatTime = (ts: string) =>
     new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const isMe = (senderId: string) =>
-    authUser ? senderId === authUser.id : senderId === 'me';
+  const isMe = (senderId: string) => senderId === 'me';
 
   return (
     <KeyboardAvoidingView
@@ -175,7 +113,7 @@ export default function ConversationScreen() {
           multiline
           maxLength={500}
         />
-        <Pressable onPress={handleSend} disabled={!text.trim() || sending} style={styles.sendBtn}>
+        <Pressable onPress={handleSend} disabled={!text.trim()} style={styles.sendBtn}>
           <LinearGradient
             colors={text.trim() ? Gradients.primary : ['#333', '#444']}
             start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}

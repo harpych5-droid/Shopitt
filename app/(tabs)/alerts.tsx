@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
 } from 'react-native';
@@ -8,8 +8,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
-import { useApp } from '@/contexts/AppContext';
-import { NotificationService } from '@/services/notificationService';
 import { NOTIFICATIONS_DATA } from '@/constants/data';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 
@@ -52,41 +50,18 @@ function NotifItem({ item, onPress }: { item: any; onPress: () => void }) {
 export default function AlertsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { notifCount, refreshNotifCount, authUser } = useApp();
-  const [notifs, setNotifs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [notifs, setNotifs] = useState<any[]>(NOTIFICATIONS_DATA as any[]);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    loadNotifs();
-  }, [authUser]);
-
-  const loadNotifs = async () => {
-    setLoading(true);
-    if (authUser) {
-      const { data, error } = await NotificationService.getNotifications(authUser.id);
-      if (!error && data.length > 0) {
-        setNotifs(data);
-      } else {
-        setNotifs(NOTIFICATIONS_DATA as any[]);
-      }
-    } else {
-      setNotifs(NOTIFICATIONS_DATA as any[]);
-    }
-    setLoading(false);
-  };
-
-  const markAllRead = async () => {
+  const markAllRead = () => {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })));
-    if (authUser) await NotificationService.markAllRead(authUser.id);
-    refreshNotifCount();
   };
 
-  const handleNotifPress = async (notif: any) => {
+  const handleNotifPress = (notif: any) => {
     setNotifs(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    if (authUser) await NotificationService.markRead(notif.id);
-    if (notif.type === 'order') router.push('/order-tracking');
-    else if (notif.type === 'message') router.push('/chat');
-    else if (notif.related_type === 'post' && notif.related_id) router.push(`/post/${notif.related_id}`);
+    if (notif.type === 'order') router.push('/order-tracking' as any);
+    else if (notif.type === 'message') router.push('/chat' as any);
+    else if (notif.related_type === 'post' && notif.related_id) router.push(`/post/${notif.related_id}` as any);
   };
 
   const hasUnread = notifs.some(n => !n.read);

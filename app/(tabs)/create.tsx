@@ -12,8 +12,6 @@ import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
 import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { useApp } from '@/contexts/AppContext';
-import { PostService } from '@/services/postService';
-import { MediaService } from '@/services/mediaService';
 
 type PostType = null | 'product' | 'video' | 'service';
 type DeliveryType = 'local' | 'country' | 'international';
@@ -28,7 +26,7 @@ const DELIVERY_INFO = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isLoggedIn, currency, authUser, user } = useApp();
+  const { currency } = useApp();
 
   const [postType, setPostType] = useState<PostType>(null);
   const [mediaFiles, setMediaFiles] = useState<Array<{ uri: string; type: 'image' | 'video' }>>([]);
@@ -75,59 +73,11 @@ export default function CreateScreen() {
 
   const handlePost = async () => {
     if (!canPost) return;
-    if (!isLoggedIn || !authUser) {
-      router.push('/auth');
-      return;
-    }
-
     setUploading(true);
 
-    // Upload media to Cloudinary
-    let mediaUrls: string[] = [];
-    if (mediaFiles.length > 0) {
-      const { urls, errors } = await MediaService.uploadMultiple(mediaFiles);
-      if (errors.length > 0 && urls.length === 0) {
-        Alert.alert('Upload Error', errors[0]);
-        setUploading(false);
-        return;
-      }
-      mediaUrls = urls;
-    }
-
-    // Parse hashtags
-    const hashtagList = hashtags
-      .split(/[\s,]+/)
-      .map(h => h.trim().startsWith('#') ? h.trim() : `#${h.trim()}`)
-      .filter(h => h.length > 1);
-
-    // Build post object
-    const priceNum = parseFloat(price.replace(/[^0-9.]/g, '')) || 0;
-    const post: any = {
-      user_id: authUser.id,
-      post_type: postType,
-      drop_title: postType === 'service' ? serviceTitle.trim() : dropTitle.trim(),
-      description: description.trim(),
-      price_text: postType === 'product' ? `${sym}${priceNum.toLocaleString()}` : null,
-      price_num: priceNum,
-      currency: currency.code,
-      quantity: postType === 'product' ? parseInt(quantity) || 1 : 1,
-      category: category || null,
-      hashtags: hashtagList,
-      media_urls: mediaUrls,
-      delivery_type: delivery,
-      courier_type: courier,
-      free_delivery: true,
-      is_active: true,
-    };
-
-    const { data, error } = await PostService.createPost(post);
-
+    // Simulate post creation
+    await new Promise(res => setTimeout(res, 800));
     setUploading(false);
-
-    if (error) {
-      Alert.alert('Error', error);
-      return;
-    }
 
     setSubmitted(true);
     setTimeout(() => {

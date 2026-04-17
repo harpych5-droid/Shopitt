@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView, Animated,
   Dimensions, KeyboardAvoidingView, Platform, TextInput, ActivityIndicator,
@@ -10,15 +10,38 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { OrderService } from '@/services/orderService';
-import { AddressService } from '@/services/addressService';
-import { NotificationService } from '@/services/notificationService';
 import { CountryPicker } from '@/components/ui/CountryPicker';
-import type { DeliveryAddress } from '@/lib/types';
 
 const { width } = Dimensions.get('window');
 
+interface DeliveryAddress {
+  fullName: string;
+  phone: string;
+  country: string;
+  city: string;
+  address: string;
+  notes?: string;
+}
+
 const EMPTY_ADDRESS: DeliveryAddress = { fullName: '', phone: '', country: '', city: '', address: '', notes: '' };
+
+function FieldInput({ label, placeholder, value, onChangeText, keyboardType, multiline }: any) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        style={[styles.fieldInput, multiline && styles.multilineInput]}
+        placeholder={placeholder}
+        placeholderTextColor={Colors.textMuted}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType || 'default'}
+        multiline={multiline}
+        numberOfLines={multiline ? 3 : 1}
+      />
+    </View>
+  );
+}
 
 function AddressForm({ initial, onSave, onCancel }: { initial: DeliveryAddress; onSave: (data: DeliveryAddress) => void; onCancel: () => void }) {
   const [form, setForm] = useState<DeliveryAddress>(initial);
@@ -56,24 +79,6 @@ function AddressForm({ initial, onSave, onCancel }: { initial: DeliveryAddress; 
   );
 }
 
-function FieldInput({ label, placeholder, value, onChangeText, keyboardType, multiline }: any) {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        style={[styles.fieldInput, multiline && styles.multilineInput]}
-        placeholder={placeholder}
-        placeholderTextColor={Colors.textMuted}
-        value={value}
-        onChangeText={onChangeText}
-        keyboardType={keyboardType || 'default'}
-        multiline={multiline}
-        numberOfLines={multiline ? 3 : 1}
-      />
-    </View>
-  );
-}
-
 const ORDER_STEPS = [
   { key: 'placed', label: 'Order Placed', icon: 'checkmark-circle', done: true },
   { key: 'confirmed', label: 'Confirmed', icon: 'shield-checkmark', done: false },
@@ -91,11 +96,10 @@ const PAY_METHODS = [
 export default function BagScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, currency, authUser, user } = useApp();
+  const { bagItems, updateQuantity, removeFromBag, bagTotal, clearBag, currency } = useApp();
   const sym = currency.symbol;
 
   const [savedAddress, setSavedAddress] = useState<DeliveryAddress | null>(null);
-  const [addressLoading, setAddressLoading] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'address' | 'payment'>('address');
   const [payMethod, setPayMethod] = useState<'mobilemoney' | 'card' | 'delivery'>('mobilemoney');
@@ -103,28 +107,6 @@ export default function BagScreen() {
   const [placing, setPlacing] = useState(false);
   const checkoutY = useRef(new Animated.Value(600)).current;
   const successScale = useRef(new Animated.Value(0)).current;
-
-  // Load saved address from Supabase
-  useEffect(() => {
-    if (authUser) loadSavedAddress();
-  }, [authUser]);
-
-  const loadSavedAddress = async () => {
-    if (!authUser) return;
-    setAddressLoading(true);
-    const addr = await AddressService.getDefaultAddress(authUser.id);
-    if (addr) {
-      setSavedAddress({
-        fullName: addr.full_name,
-        phone: addr.phone,
-        country: addr.country,
-        city: addr.city,
-        address: addr.address,
-        notes: addr.notes ?? '',
-      });
-    }
-    setAddressLoading(false);
-  };
 
   const openCheckout = () => {
     setShowCheckout(true);
@@ -136,70 +118,16 @@ export default function BagScreen() {
     Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => setShowCheckout(false));
   };
 
-  const handleSaveAddress = async (data: DeliveryAddress) => {
+  const handleSaveAddress = (data: DeliveryAddress) => {
     setSavedAddress(data);
-    // Persist to Supabase
-    if (authUser) {
-      await AddressService.saveAddress({
-        user_id: authUser.id,
-        full_name: data.fullName,
-        phone: data.phone,
-        country: data.country,
-        city: data.city,
-        address: data.address,
-        notes: data.notes ?? null,
-        is_default: true,
-      });
-    }
     setCheckoutStep('payment');
   };
 
   const placeOrder = async () => {
     if (!savedAddress) return;
     setPlacing(true);
-
-    if (authUser && bagItems.length > 0) {
-      const firstItem = bagItems[0];
-      const sellerId = firstItem.sellerId || authUser.id; // fallback for demo
-
-      await OrderService.createOrder({
-        buyer_id: authUser.id,
-        seller_id: sellerId,
-        post_id: firstItem.postId || null,
-        items: bagItems.map(item => ({
-          post_id: item.postId,
-          seller_id: item.sellerId,
-          product: item.product,
-          price: item.price,
-          price_num: item.priceNum,
-          quantity: item.quantity,
-          image: item.image,
-          currency: item.currency,
-        })),
-        delivery_address: savedAddress,
-        payment_method: payMethod,
-        subtotal: bagTotal,
-        total: bagTotal,
-        currency: currency.code,
-        delivery_type: 'country',
-      });
-
-      // Notify seller
-      if (sellerId !== authUser.id) {
-        await NotificationService.create({
-          user_id: sellerId,
-          type: 'order',
-          title: 'New Order Received!',
-          body: `${user?.username ?? 'Someone'} ordered ${firstItem.product}`,
-          related_id: firstItem.postId ?? undefined,
-          related_type: 'order',
-          read: false,
-          avatar_url: user?.avatar_url ?? null,
-        });
-      }
-    }
-
     // Insert payment gateway API here
+    await new Promise(res => setTimeout(res, 800));
     setPlacing(false);
     Animated.timing(checkoutY, { toValue: 600, duration: 250, useNativeDriver: true }).start();
     setSuccess(true);

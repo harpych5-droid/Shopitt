@@ -9,7 +9,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
 import { useApp } from '@/contexts/AppContext';
-import { WalletService } from '@/services/walletService';
 import { REVENUE_DATA } from '@/constants/data';
 
 function useAnimatedCount(target: number, duration = 1200) {
@@ -33,7 +32,7 @@ const PROVIDERS = [
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { currency, authUser, user } = useApp();
+  const { currency } = useApp();
 
   const [balance, setBalance] = useState(user?.wallet_balance ?? 0);
   const [totalEarnings, setTotalEarnings] = useState(0);
@@ -55,27 +54,8 @@ export default function WalletScreen() {
   const sym = currency.symbol;
 
   useEffect(() => {
-    loadWallet();
-  }, [authUser]);
-
-  const loadWallet = async () => {
-    if (!authUser) { setLoading(false); return; }
-    setLoading(true);
-
-    const [balRes, txRes, earningsRes, weeklyRes] = await Promise.all([
-      WalletService.getBalance(authUser.id),
-      WalletService.getTransactions(authUser.id),
-      WalletService.getTotalEarnings(authUser.id),
-      WalletService.getWeeklyRevenue(authUser.id),
-    ]);
-
-    setBalance(balRes);
-    if (txRes.data.length > 0) setTransactions(txRes.data);
-    setTotalEarnings(earningsRes.total);
-    if (weeklyRes.some(d => d.value > 0)) setRevenueData(weeklyRes);
-
     setLoading(false);
-  };
+  }, []);
 
   const openWithdraw = () => {
     setShowWithdraw(true);
@@ -92,10 +72,7 @@ export default function WalletScreen() {
     setWithdrawing(true);
 
     // Insert payment gateway API here
-    if (authUser) {
-      await WalletService.requestWithdrawal(authUser.id, amount, provider, phone);
-    }
-
+    // Insert payment gateway API here
     Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
     setWithdrawing(false);
     setSuccess(true);
