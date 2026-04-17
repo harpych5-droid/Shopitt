@@ -1,57 +1,67 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, FlatList,
+  View, Text, StyleSheet, Pressable, FlatList, TextInput,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography } from '@/constants/theme';
+import { useApp } from '@/contexts/AppContext';
+import { ChatService } from '@/services/chatService';
+import { DbConversation } from '@/lib/types';
 import { CHAT_LIST } from '@/constants/data';
+
+function formatTime(ts: string | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 2) return 'Just now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return d.toLocaleDateString();
+}
 
 export default function ChatListScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState<'all' | 'unread'>('all');
+  const { authUser, profile } = useApp();
+  const [convos, setConvos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
 
-  const totalUnread = CHAT_LIST.reduce((s, c) => s + c.unread, 0);
+  useEffect(() => {
+    loadConversations();
+  }, [authUser]);
 
-  const filtered = activeFilter === 'unread'
-    ? CHAT_LIST.filter(c => c.unread > 0)
-    : CHAT_LIST;
+  const loadConversations = async () => {
+    setLoading(true);
+    if (authUser) {
+      const data = await ChatService.getConversations(authUser.id);
+      setConvos(data.length > 0 ? data : CHAT_LIST);
+    } else {
+      setConvos(CHAT_LIST);
+    }
+    setLoading(false);
+  };
 
-  const renderChat = ({ item }: any) => (
-    <Pressable
-      style={styles.chatItem}
-      onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })}
-    >
-      <View style={styles.avatarWrap}>
-        <Image source={{ uri: item.avatar }} style={styles.avatar} contentFit="cover" />
-        {item.online && <View style={styles.onlineDot} />}
-      </View>
+  const filtered = search.trim()
+    ? convos.filter(c => {
+        const name = c.other_user?.username || c.username || '';
+        return name.toLowerCase().includes(search.toLowerCase());
+      })
+    : convos;
 
-      <View style={styles.chatInfo}>
-        <View style={styles.chatTop}>
-          <View style={styles.chatNameRow}>
-            <Text style={styles.chatName}>{item.username}</Text>
-            {item.verified && (
-              <MaterialIcons name="verified" size={13} color={Colors.verified} style={{ marginLeft: 3 }} />
-            )}
-          </View>
-          <Text style={[styles.chatTime, item.unread > 0 && { color: Colors.pink }]}>{item.time}</Text>
-        </View>
-        <Text style={[styles.chatMsg, item.unread > 0 && { color: Colors.textPrimary }]}
-          numberOfLines={1}>{item.lastMessage}</Text>
-      </View>
-
-      {item.unread > 0 && (
-        <View style={styles.unreadBadge}>
-          <Text style={styles.unreadText}>{item.unread}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
+  const openConversation = (item: any) => {
+    const convoId = item.id;
+    const otherUserId = item.other_user?.id || item.id;
+    router.push(`/chat/${convoId}?otherUser=${item.other_user?.username || item.username}`);
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -60,54 +70,80 @@ export default function ChatListScreen() {
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>Messages</Text>
-          {totalUnread > 0 && (
-            <View style={styles.headerBadge}>
-              <Text style={styles.headerBadgeText}>{totalUnread}</Text>
-            </View>
-          )}
-        </View>
+        <Text style={styles.headerTitle}>Messages</Text>
         <Pressable hitSlop={8}>
-          <Ionicons name="create-outline" size={24} color="#fff" />
+          <Ionicons name="create-outline" size={24} color={Colors.pink} />
         </Pressable>
       </View>
 
-      {/* Filter Tabs */}
-      <View style={styles.filters}>
-        <Pressable onPress={() => setActiveFilter('all')}>
-          {activeFilter === 'all' ? (
-            <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-              style={styles.filterPill}>
-              <Text style={[styles.filterText, { color: '#fff' }]}>All Messages</Text>
-            </LinearGradient>
-          ) : (
-            <View style={styles.filterPillInactive}>
-              <Text style={styles.filterText}>All Messages</Text>
-            </View>
-          )}
-        </Pressable>
-        <Pressable onPress={() => setActiveFilter('unread')}>
-          {activeFilter === 'unread' ? (
-            <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-              style={styles.filterPill}>
-              <Text style={[styles.filterText, { color: '#fff' }]}>Unread ({totalUnread})</Text>
-            </LinearGradient>
-          ) : (
-            <View style={styles.filterPillInactive}>
-              <Text style={styles.filterText}>Unread ({totalUnread})</Text>
-            </View>
-          )}
-        </Pressable>
+      {/* Search */}
+      <View style={styles.searchWrap}>
+        <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search conversations..."
+          placeholderTextColor={Colors.textMuted}
+          value={search}
+          onChangeText={setSearch}
+        />
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={item => item.id}
-        renderItem={renderChat}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-      />
+      {loading ? (
+        <View style={styles.loading}>
+          <ActivityIndicator color={Colors.pink} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={item => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+          renderItem={({ item }) => {
+            const username = item.other_user?.username || item.username || 'User';
+            const avatar = item.other_user?.avatar_url || item.avatar;
+            const lastMsg = item.last_message || item.lastMessage || '';
+            const time = item.last_message_at ? formatTime(item.last_message_at) : (item.time || '');
+            const unread = item.unread_1 || item.unread_2 || item.unread || 0;
+            const online = item.online || false;
+            return (
+              <Pressable onPress={() => openConversation(item)} style={styles.convoItem}>
+                <View style={styles.avatarWrap}>
+                  {avatar ? (
+                    <Image source={{ uri: avatar }} style={styles.avatar} contentFit="cover" />
+                  ) : (
+                    <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
+                      <Text style={styles.avatarFallbackText}>{username.charAt(0).toUpperCase()}</Text>
+                    </LinearGradient>
+                  )}
+                  {online && <View style={styles.onlineDot} />}
+                </View>
+                <View style={styles.convoInfo}>
+                  <View style={styles.convoTop}>
+                    <Text style={styles.convoName}>@{username}</Text>
+                    <Text style={styles.convoTime}>{time}</Text>
+                  </View>
+                  <View style={styles.convoBottom}>
+                    <Text style={[styles.convoMsg, unread > 0 && styles.convoMsgUnread]} numberOfLines={1}>
+                      {lastMsg}
+                    </Text>
+                    {unread > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadText}>{unread}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="chatbubbles-outline" size={40} color={Colors.textMuted} />
+              <Text style={styles.emptyText}>No conversations yet</Text>
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }
@@ -119,44 +155,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  headerTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
-  headerBadge: {
-    backgroundColor: Colors.pink, borderRadius: Radius.pill,
-    paddingHorizontal: 8, paddingVertical: 2,
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.surface, borderRadius: Radius.pill,
+    marginHorizontal: 16, marginVertical: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1, borderColor: Colors.border,
   },
-  headerBadgeText: { color: '#fff', fontSize: Typography.xs, fontWeight: Typography.bold },
-  filters: {
-    flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
-  },
-  filterPill: { borderRadius: Radius.pill, paddingHorizontal: 18, paddingVertical: 9 },
-  filterPillInactive: {
-    borderRadius: Radius.pill, paddingHorizontal: 18, paddingVertical: 9,
-    borderWidth: 1.5, borderColor: Colors.border,
-  },
-  filterText: { color: Colors.textSecondary, fontSize: Typography.sm, fontWeight: Typography.semibold },
-  chatItem: {
+  searchInput: { flex: 1, color: '#fff', fontSize: Typography.base },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  convoItem: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   avatarWrap: { position: 'relative' },
-  avatar: { width: 52, height: 52, borderRadius: 26 },
+  avatar: { width: 50, height: 50, borderRadius: 25 },
+  avatarFallback: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
+  avatarFallbackText: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.bold },
   onlineDot: {
     position: 'absolute', bottom: 1, right: 1,
     width: 12, height: 12, borderRadius: 6,
     backgroundColor: Colors.success, borderWidth: 2, borderColor: Colors.background,
   },
-  chatInfo: { flex: 1, gap: 4 },
-  chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatNameRow: { flexDirection: 'row', alignItems: 'center' },
-  chatName: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  chatTime: { color: Colors.textMuted, fontSize: Typography.xs },
-  chatMsg: { color: Colors.textSecondary, fontSize: Typography.sm },
+  convoInfo: { flex: 1 },
+  convoTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  convoName: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
+  convoTime: { color: Colors.textMuted, fontSize: Typography.xs },
+  convoBottom: { flexDirection: 'row', alignItems: 'center' },
+  convoMsg: { color: Colors.textSecondary, fontSize: Typography.sm, flex: 1 },
+  convoMsgUnread: { color: '#fff', fontWeight: Typography.semibold },
   unreadBadge: {
-    backgroundColor: Colors.pink, borderRadius: Radius.circle,
-    width: 22, height: 22, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.pink, borderRadius: 10,
+    minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
   },
   unreadText: { color: '#fff', fontSize: 11, fontWeight: Typography.bold },
-  separator: { height: 1, backgroundColor: Colors.divider, marginLeft: 80 },
+  empty: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 60 },
+  emptyText: { color: Colors.textMuted, fontSize: Typography.base },
 });

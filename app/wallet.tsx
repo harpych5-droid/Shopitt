@@ -1,799 +1,387 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, ScrollView,
-  Animated, Dimensions, Modal, TextInput, Platform,
-  KeyboardAvoidingView,
+  View, Text, StyleSheet, Pressable, ScrollView, Animated,
+  TextInput, FlatList, ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
+import { useApp } from '@/contexts/AppContext';
+import { WalletService } from '@/services/walletService';
+import { DbWalletTransaction } from '@/lib/types';
+import { REVENUE_DATA } from '@/constants/data';
 
-const { width } = Dimensions.get('window');
-
-// ─── Mock Data ───────────────────────────────────────────────
-const WALLET_DATA = {
-  pendingBalance: 12400,
-  availableBalance: 36700,
-  totalEarnings: 49100,
-  totalWithdrawn: 28500,
-  currency: 'K',
-};
-
-const BREAKDOWN = [
-  { label: 'Streetwear', value: 41, color: '#FF4DA6' },
-  { label: 'Sneakers', value: 28, color: '#7B5CFF' },
-  { label: 'Accessories', value: 18, color: '#FF8C00' },
-  { label: 'Other', value: 13, color: '#00C851' },
-];
-
-const WITHDRAWAL_HISTORY = [
-  { id: 'w1', method: 'Airtel Money', amount: 8500, date: 'Apr 13, 2026', status: 'completed', number: '**** 4821' },
-  { id: 'w2', method: 'MTN Money', amount: 12000, date: 'Apr 08, 2026', status: 'completed', number: '**** 3301' },
-  { id: 'w3', method: 'Zamtel Kwacha', amount: 5000, date: 'Apr 01, 2026', status: 'completed', number: '**** 7754' },
-  { id: 'w4', method: 'Airtel Money', amount: 3000, date: 'Mar 25, 2026', status: 'pending', number: '**** 4821' },
-];
-
-const WEEKLY_REVENUE = [
-  { day: 'M', value: 3200 },
-  { day: 'T', value: 5800 },
-  { day: 'W', value: 4100 },
-  { day: 'T', value: 7200 },
-  { day: 'F', value: 9600 },
-  { day: 'S', value: 12400 },
-  { day: 'S', value: 6800 },
-];
-
-const MOBILE_MONEY_PROVIDERS = [
-  { id: 'airtel', label: 'Airtel Money', icon: 'cellphone', color: '#E40000' },
-  { id: 'mtn', label: 'MTN Money', icon: 'cellphone', color: '#FFCC00' },
-  { id: 'zamtel', label: 'Zamtel Kwacha', icon: 'cellphone', color: '#009900' },
-];
-
-// ─── Animated Counter ────────────────────────────────────────
-function AnimatedCounter({ value, prefix = '', duration = 1200, style }: {
-  value: number; prefix?: string; duration?: number; style?: any;
-}) {
-  const animVal = useRef(new Animated.Value(0)).current;
+function useAnimatedCount(target: number, duration = 1200) {
+  const anim = useRef(new Animated.Value(0)).current;
   const [display, setDisplay] = useState(0);
-
   useEffect(() => {
-    Animated.timing(animVal, {
-      toValue: value,
-      duration,
-      useNativeDriver: false,
-    }).start();
-
-    const listener = animVal.addListener(({ value: v }) => {
-      setDisplay(Math.round(v));
-    });
-    return () => animVal.removeListener(listener);
-  }, [value]);
-
-  return (
-    <Text style={style}>
-      {prefix}{display.toLocaleString()}
-    </Text>
-  );
+    Animated.timing(anim, { toValue: target, duration, useNativeDriver: false }).start();
+    const sub = anim.addListener(({ value }) => setDisplay(Math.round(value)));
+    return () => anim.removeListener(sub);
+  }, [target]);
+  return display;
 }
 
-// ─── Revenue Bar Chart ───────────────────────────────────────
-function RevenueChart() {
-  const maxVal = Math.max(...WEEKLY_REVENUE.map(d => d.value));
-  const barAnims = useRef(WEEKLY_REVENUE.map(() => new Animated.Value(0))).current;
-  const today = 5; // Saturday index
+const PROVIDERS = [
+  { id: 'mtn', label: 'MTN Mobile Money', icon: '📱' },
+  { id: 'airtel', label: 'Airtel Money', icon: '📲' },
+  { id: 'zamtel', label: 'Zamtel Kwacha', icon: '💳' },
+  { id: 'bank', label: 'Bank Transfer', icon: '🏦' },
+];
 
-  useEffect(() => {
-    const animations = barAnims.map((anim, i) =>
-      Animated.timing(anim, {
-        toValue: WEEKLY_REVENUE[i].value / maxVal,
-        duration: 700 + i * 80,
-        delay: 300 + i * 60,
-        useNativeDriver: false,
-      })
-    );
-    Animated.stagger(60, animations).start();
-  }, []);
-
-  const chartHeight = 100;
-
-  return (
-    <View style={chart.container}>
-      <View style={chart.barsRow}>
-        {WEEKLY_REVENUE.map((d, i) => {
-          const isToday = i === today;
-          const barHeight = barAnims[i].interpolate({
-            inputRange: [0, 1],
-            outputRange: [4, chartHeight],
-          });
-          return (
-            <View key={i} style={chart.barWrap}>
-              <View style={[chart.barOuter, { height: chartHeight }]}>
-                <Animated.View style={[chart.barInner, { height: barHeight }]}>
-                  {isToday ? (
-                    <LinearGradient
-                      colors={Gradients.primary}
-                      start={{ x: 0.5, y: 1 }}
-                      end={{ x: 0.5, y: 0 }}
-                      style={StyleSheet.absoluteFill}
-                    />
-                  ) : (
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#3A1A30' }]} />
-                  )}
-                </Animated.View>
-              </View>
-              <Text style={[chart.dayLabel, isToday && chart.dayLabelActive]}>{d.day}</Text>
-              {isToday && (
-                <Text style={chart.peakLabel}>{(d.value / 1000).toFixed(1)}K</Text>
-              )}
-            </View>
-          );
-        })}
-      </View>
-      <View style={chart.footer}>
-        <View style={chart.dot} />
-        <Text style={chart.peakText}>Peak: Saturday</Text>
-        <Text style={chart.growthText}>↗ +28% vs last week</Text>
-      </View>
-    </View>
-  );
-}
-
-const chart = StyleSheet.create({
-  container: { gap: 8 },
-  barsRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 6,
-    paddingHorizontal: 4,
-  },
-  barWrap: { flex: 1, alignItems: 'center', gap: 4 },
-  barOuter: { width: '100%', justifyContent: 'flex-end', borderRadius: 6, overflow: 'hidden' },
-  barInner: { width: '100%', borderRadius: 6, overflow: 'hidden' },
-  dayLabel: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontWeight: Typography.semibold,
-  },
-  dayLabelActive: { color: Colors.pink },
-  peakLabel: {
-    position: 'absolute',
-    top: -18,
-    color: Colors.pink,
-    fontSize: 9,
-    fontWeight: Typography.bold,
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.pink },
-  peakText: { color: Colors.textSecondary, fontSize: Typography.xs, flex: 1 },
-  growthText: { color: Colors.sold, fontSize: Typography.xs, fontWeight: Typography.semibold },
-});
-
-// ─── Donut-style Breakdown ───────────────────────────────────
-function BreakdownBar() {
-  const anims = useRef(BREAKDOWN.map(() => new Animated.Value(0))).current;
-
-  useEffect(() => {
-    Animated.stagger(120, BREAKDOWN.map((d, i) =>
-      Animated.timing(anims[i], {
-        toValue: d.value / 100,
-        duration: 800,
-        delay: 500 + i * 100,
-        useNativeDriver: false,
-      })
-    )).start();
-  }, []);
-
-  const barW = width - 32 - 40; // padding
-
-  return (
-    <View style={bd.container}>
-      <Text style={bd.title}>Revenue Breakdown</Text>
-      {BREAKDOWN.map((d, i) => {
-        const barWidth = anims[i].interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, barW * (d.value / 100)],
-        });
-        return (
-          <View key={d.label} style={bd.row}>
-            <View style={[bd.dot, { backgroundColor: d.color }]} />
-            <Text style={bd.label}>{d.label}</Text>
-            <View style={bd.trackOuter}>
-              <Animated.View style={[bd.trackInner, { width: barWidth, backgroundColor: d.color }]} />
-            </View>
-            <Text style={[bd.pct, { color: d.color }]}>{d.value}%</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const bd = StyleSheet.create({
-  container: { gap: 12 },
-  title: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold, marginBottom: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  label: { color: Colors.textSecondary, fontSize: Typography.sm, width: 90 },
-  trackOuter: {
-    flex: 1, height: 6, backgroundColor: Colors.surfaceElevated,
-    borderRadius: 3, overflow: 'hidden',
-  },
-  trackInner: { height: 6, borderRadius: 3 },
-  pct: { fontSize: Typography.xs, fontWeight: Typography.bold, width: 30, textAlign: 'right' },
-});
-
-// ─── Withdraw Modal ──────────────────────────────────────────
-function WithdrawModal({ visible, onClose, maxAmount }: {
-  visible: boolean; onClose: () => void; maxAmount: number;
-}) {
-  const [step, setStep] = useState<'amount' | 'provider' | 'number' | 'confirm' | 'success'>('amount');
-  const [amount, setAmount] = useState('');
-  const [provider, setProvider] = useState<any>(null);
-  const [phone, setPhone] = useState('');
-  const successScale = useRef(new Animated.Value(0)).current;
-  const successOpacity = useRef(new Animated.Value(0)).current;
-  const slideY = useRef(new Animated.Value(50)).current;
-  const fadeIn = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (visible) {
-      setStep('amount');
-      setAmount('');
-      setProvider(null);
-      setPhone('');
-      Animated.parallel([
-        Animated.timing(slideY, { toValue: 0, duration: 350, useNativeDriver: true }),
-        Animated.timing(fadeIn, { toValue: 1, duration: 350, useNativeDriver: true }),
-      ]).start();
-    }
-  }, [visible]);
-
-  useEffect(() => {
-    if (step === 'success') {
-      Animated.sequence([
-        Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 80, friction: 6 }),
-        Animated.timing(successOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
-      ]).start();
-      setTimeout(() => {
-        successScale.setValue(0);
-        successOpacity.setValue(0);
-        onClose();
-      }, 2800);
-    }
-  }, [step]);
-
-  const amtNum = parseInt(amount) || 0;
-  const canProceedAmount = amtNum >= 50 && amtNum <= maxAmount;
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={modal.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={modal.kvWrap}
-        pointerEvents="box-none"
-      >
-        <Animated.View style={[modal.sheet, { transform: [{ translateY: slideY }], opacity: fadeIn }]}>
-          {/* Handle */}
-          <View style={modal.handle} />
-
-          {step === 'amount' && (
-            <View style={modal.content}>
-              <Text style={modal.title}>Withdraw Funds</Text>
-              <Text style={modal.sub}>Available: K{maxAmount.toLocaleString()}</Text>
-              <View style={modal.amountInputWrap}>
-                <Text style={modal.currencySymbol}>K</Text>
-                <TextInput
-                  style={modal.amountInput}
-                  placeholder="0"
-                  placeholderTextColor={Colors.textMuted}
-                  value={amount}
-                  onChangeText={setAmount}
-                  keyboardType="numeric"
-                  maxLength={7}
-                  autoFocus
-                />
-              </View>
-              <View style={modal.quickAmounts}>
-                {[500, 1000, 5000, 10000].map(q => (
-                  <Pressable key={q} onPress={() => setAmount(String(q))} style={modal.quickBtn}>
-                    <Text style={modal.quickBtnText}>K{q.toLocaleString()}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              {amtNum > maxAmount && (
-                <Text style={modal.errorText}>Exceeds available balance</Text>
-              )}
-              <Pressable
-                onPress={() => canProceedAmount && setStep('provider')}
-                disabled={!canProceedAmount}
-                style={{ width: '100%', marginTop: 16 }}
-              >
-                <LinearGradient
-                  colors={canProceedAmount ? Gradients.primary : ['#333', '#444']}
-                  start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                  style={modal.continueBtn}
-                >
-                  <Text style={modal.continueBtnText}>Continue →</Text>
-                </LinearGradient>
-              </Pressable>
-            </View>
-          )}
-
-          {step === 'provider' && (
-            <View style={modal.content}>
-              <Pressable onPress={() => setStep('amount')} style={modal.backBtn}>
-                <Ionicons name="arrow-back" size={20} color={Colors.textSecondary} />
-              </Pressable>
-              <Text style={modal.title}>Select Provider</Text>
-              <Text style={modal.sub}>Withdrawing K{parseInt(amount).toLocaleString()}</Text>
-              {MOBILE_MONEY_PROVIDERS.map(p => (
-                <Pressable key={p.id} onPress={() => { setProvider(p); setStep('number'); }}
-                  style={[modal.providerCard, provider?.id === p.id && modal.providerCardActive]}>
-                  <View style={[modal.providerDot, { backgroundColor: p.color }]} />
-                  <Text style={modal.providerLabel}>{p.label}</Text>
-                  <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          {step === 'number' && (
-            <View style={modal.content}>
-              <Pressable onPress={() => setStep('provider')} style={modal.backBtn}>
-                <Ionicons name="arrow-back" size={20} color={Colors.textSecondary} />
-              </Pressable>
-              <Text style={modal.title}>{provider?.label}</Text>
-              <Text style={modal.sub}>Enter your mobile number</Text>
-              <TextInput
-                style={modal.phoneInput}
-                placeholder="+260 97X XXX XXX"
-                placeholderTextColor={Colors.textMuted}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                autoFocus
-              />
-              <Pressable
-                onPress={() => phone.length >= 9 && setStep('confirm')}
-                disabled={phone.length < 9}
-                style={{ width: '100%', marginTop: 16 }}
-              >
-                <LinearGradient
-                  colors={phone.length >= 9 ? Gradients.primary : ['#333', '#444']}
-                  start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                  style={modal.continueBtn}
-                >
-                  <Text style={modal.continueBtnText}>Review →</Text>
-                </LinearGradient>
-              </Pressable>
-            </View>
-          )}
-
-          {step === 'confirm' && (
-            <View style={modal.content}>
-              <Pressable onPress={() => setStep('number')} style={modal.backBtn}>
-                <Ionicons name="arrow-back" size={20} color={Colors.textSecondary} />
-              </Pressable>
-              <Text style={modal.title}>Confirm Withdrawal</Text>
-              <View style={modal.confirmCard}>
-                <ConfirmRow label="Amount" value={`K${parseInt(amount).toLocaleString()}`} highlight />
-                <ConfirmRow label="Provider" value={provider?.label} />
-                <ConfirmRow label="Number" value={phone} />
-                <ConfirmRow label="Fee" value="Free" />
-                <ConfirmRow label="Arrives" value="Within 5 minutes" />
-              </View>
-              <Pressable onPress={() => setStep('success')} style={{ width: '100%', marginTop: 16 }}>
-                <LinearGradient
-                  colors={Gradients.primary}
-                  start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                  style={[modal.continueBtn, Shadow.glow]}
-                >
-                  <Ionicons name="checkmark-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={modal.continueBtnText}>Confirm Withdrawal</Text>
-                </LinearGradient>
-              </Pressable>
-            </View>
-          )}
-
-          {step === 'success' && (
-            <View style={[modal.content, modal.successContent]}>
-              <Animated.View style={[modal.successCircle, { transform: [{ scale: successScale }], opacity: successOpacity }]}>
-                <LinearGradient colors={Gradients.primary} style={modal.successGradCircle}>
-                  <Ionicons name="checkmark" size={48} color="#fff" />
-                </LinearGradient>
-              </Animated.View>
-              <Text style={modal.successTitle}>Withdrawal Sent!</Text>
-              <Text style={modal.successSub}>
-                K{parseInt(amount).toLocaleString()} is on its way to {provider?.label}
-              </Text>
-              <Text style={modal.successTime}>Arriving within 5 minutes ⚡</Text>
-            </View>
-          )}
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-function ConfirmRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <View style={modal.confirmRow}>
-      <Text style={modal.confirmLabel}>{label}</Text>
-      <Text style={[modal.confirmValue, highlight && modal.confirmValueHighlight]}>{value}</Text>
-    </View>
-  );
-}
-
-const modal = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)' },
-  kvWrap: { flex: 1, justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 20,
-    paddingBottom: 36,
-    paddingTop: 12,
-  },
-  handle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: Colors.textMuted,
-    alignSelf: 'center', marginBottom: 20,
-  },
-  content: { gap: 12 },
-  title: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
-  sub: { color: Colors.textSecondary, fontSize: Typography.sm, marginTop: -4 },
-  backBtn: { alignSelf: 'flex-start', padding: 4 },
-  amountInputWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.surfaceElevated, borderRadius: Radius.lg,
-    borderWidth: 1.5, borderColor: Colors.pink,
-    paddingHorizontal: 16, marginVertical: 8,
-  },
-  currencySymbol: {
-    color: Colors.pink, fontSize: 28, fontWeight: Typography.bold, marginRight: 8,
-  },
-  amountInput: {
-    flex: 1, color: '#fff', fontSize: 32, fontWeight: Typography.black,
-    paddingVertical: 14, includeFontPadding: false,
-  },
-  quickAmounts: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  quickBtn: {
-    borderRadius: Radius.pill, borderWidth: 1.5, borderColor: Colors.border,
-    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: Colors.surfaceElevated,
-  },
-  quickBtnText: { color: Colors.textSecondary, fontSize: Typography.sm, fontWeight: Typography.semibold },
-  errorText: { color: Colors.error, fontSize: Typography.sm },
-  continueBtn: {
-    borderRadius: Radius.pill, paddingVertical: 16, alignItems: 'center',
-    justifyContent: 'center', flexDirection: 'row', gap: 4,
-  },
-  continueBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  providerCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: Colors.surfaceElevated, borderRadius: Radius.lg, padding: 16,
-    borderWidth: 1.5, borderColor: Colors.border,
-  },
-  providerCardActive: { borderColor: Colors.pink },
-  providerDot: { width: 14, height: 14, borderRadius: 7 },
-  providerLabel: { flex: 1, color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold },
-  phoneInput: {
-    backgroundColor: Colors.surfaceElevated, borderRadius: Radius.md,
-    borderWidth: 1.5, borderColor: Colors.border, color: '#fff',
-    fontSize: Typography.lg, paddingHorizontal: 16, paddingVertical: 14,
-  },
-  confirmCard: {
-    backgroundColor: Colors.surfaceElevated, borderRadius: Radius.lg,
-    padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border,
-  },
-  confirmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  confirmLabel: { color: Colors.textSecondary, fontSize: Typography.sm },
-  confirmValue: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold },
-  confirmValueHighlight: { color: Colors.pink, fontSize: Typography.lg },
-  successContent: { alignItems: 'center', paddingVertical: 24 },
-  successCircle: { marginBottom: 16 },
-  successGradCircle: {
-    width: 96, height: 96, borderRadius: 48,
-    alignItems: 'center', justifyContent: 'center',
-    ...Shadow.glow,
-  },
-  successTitle: { color: '#fff', fontSize: Typography.xxl, fontWeight: Typography.black },
-  successSub: { color: Colors.textSecondary, fontSize: Typography.base, textAlign: 'center', lineHeight: 22 },
-  successTime: { color: Colors.sold, fontSize: Typography.sm, fontWeight: Typography.semibold, marginTop: 4 },
-});
-
-// ─── Main Wallet Screen ───────────────────────────────────────
 export default function WalletScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { authUser, profile, currency } = useApp();
+
+  const [balance, setBalance] = useState(0);
+  const [totalEarnings, setTotalEarnings] = useState(0);
+  const [transactions, setTransactions] = useState<DbWalletTransaction[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Withdraw modal
   const [showWithdraw, setShowWithdraw] = useState(false);
-  const headerGlow = useRef(new Animated.Value(0.4)).current;
+  const [provider, setProvider] = useState('mtn');
+  const [phone, setPhone] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const modalY = useRef(new Animated.Value(600)).current;
+  const successScale = useRef(new Animated.Value(0)).current;
+
+  const displayBalance = useAnimatedCount(balance);
+  const displayEarnings = useAnimatedCount(totalEarnings);
+  const sym = currency.symbol;
 
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(headerGlow, { toValue: 0.7, duration: 2400, useNativeDriver: true }),
-        Animated.timing(headerGlow, { toValue: 0.4, duration: 2400, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
+    loadWallet();
+  }, [authUser]);
+
+  const loadWallet = async () => {
+    setLoading(true);
+    if (authUser) {
+      const [bal, earn, txns] = await Promise.all([
+        WalletService.getBalance(authUser.id),
+        WalletService.getTotalEarnings(authUser.id),
+        WalletService.getTransactions(authUser.id),
+      ]);
+      setBalance(bal);
+      setTotalEarnings(earn);
+      setTransactions(txns);
+    } else {
+      // Mock data
+      setBalance(4850);
+      setTotalEarnings(49200);
+      setTransactions(MOCK_TRANSACTIONS);
+    }
+    setLoading(false);
+  };
+
+  const openWithdraw = () => {
+    setShowWithdraw(true);
+    Animated.spring(modalY, { toValue: 0, useNativeDriver: true, tension: 50, friction: 9 }).start();
+  };
+
+  const closeWithdraw = () => {
+    Animated.timing(modalY, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => setShowWithdraw(false));
+  };
+
+  const handleWithdraw = async () => {
+    const amount = parseFloat(withdrawAmount);
+    if (!phone.trim() || !amount || amount <= 0 || amount > balance) return;
+    setWithdrawing(true);
+
+    // Insert payment gateway API here — e.g. MTN Mobile Money Zambia Disbursement API
+    const desc = `Withdrawal to ${phone} via ${PROVIDERS.find(p => p.id === provider)?.label}`;
+
+    if (authUser) {
+      await WalletService.requestWithdrawal(authUser.id, amount, desc);
+    }
+
+    Animated.timing(modalY, { toValue: 600, duration: 200, useNativeDriver: true }).start();
+    setWithdrawing(false);
+    setSuccess(true);
+    Animated.spring(successScale, { toValue: 1, useNativeDriver: true, tension: 60, friction: 8, delay: 100 }).start();
+    setTimeout(() => {
+      setSuccess(false);
+      successScale.setValue(0);
+      setShowWithdraw(false);
+      setBalance(prev => prev - amount);
+      setWithdrawAmount('');
+      setPhone('');
+    }, 2500);
+  };
+
+  const barMax = Math.max(...REVENUE_DATA.map(d => d.value));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
-        <Text style={styles.headerTitle}>My Wallet</Text>
-        <Pressable hitSlop={8}>
-          <Ionicons name="help-circle-outline" size={24} color={Colors.textMuted} />
-        </Pressable>
+        <Text style={styles.headerTitle}>Seller Wallet</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-
-        {/* ── HERO BALANCE CARD ── */}
-        <View style={styles.heroCardWrap}>
-          <LinearGradient
-            colors={Gradients.primary}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={styles.heroCard}
-          >
-            <Animated.View style={[styles.glowBlob, { opacity: headerGlow }]} />
-            <Text style={styles.heroLabel}>Total Earnings</Text>
-            <AnimatedCounter
-              value={WALLET_DATA.totalEarnings}
-              prefix="K"
-              duration={1400}
-              style={styles.heroAmount}
-            />
-            <View style={styles.heroDivider} />
-            <View style={styles.heroSubRow}>
-              <View style={styles.heroSubItem}>
-                <Text style={styles.heroSubLabel}>Available</Text>
-                <AnimatedCounter
-                  value={WALLET_DATA.availableBalance}
-                  prefix="K"
-                  duration={1200}
-                  style={styles.heroSubValue}
-                />
-              </View>
-              <View style={styles.heroSubDivider} />
-              <View style={styles.heroSubItem}>
-                <Text style={styles.heroSubLabel}>Pending</Text>
-                <AnimatedCounter
-                  value={WALLET_DATA.pendingBalance}
-                  prefix="K"
-                  duration={1000}
-                  style={styles.heroSubValuePending}
-                />
-              </View>
-              <View style={styles.heroSubDivider} />
-              <View style={styles.heroSubItem}>
-                <Text style={styles.heroSubLabel}>Withdrawn</Text>
-                <AnimatedCounter
-                  value={WALLET_DATA.totalWithdrawn}
-                  prefix="K"
-                  duration={1100}
-                  style={styles.heroSubValue}
-                />
-              </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+        {/* Balance hero */}
+        <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          style={[styles.balanceCard, Shadow.glow]}>
+          <Text style={styles.balanceLabel}>Available Balance</Text>
+          <Text style={styles.balanceAmount}>{sym}{displayBalance.toLocaleString()}</Text>
+          <View style={styles.balanceStats}>
+            <View style={styles.balanceStat}>
+              <Text style={styles.balanceStatVal}>{sym}{displayEarnings.toLocaleString()}</Text>
+              <Text style={styles.balanceStatLabel}>Total Earnings</Text>
             </View>
-          </LinearGradient>
-        </View>
-
-        {/* ── WITHDRAW BUTTON ── */}
-        <Pressable onPress={() => setShowWithdraw(true)} style={styles.withdrawBtnWrap}>
-          <LinearGradient
-            colors={Gradients.primary}
-            start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-            style={[styles.withdrawBtn, Shadow.glow]}
-          >
-            <MaterialCommunityIcons name="bank-transfer-out" size={22} color="#fff" />
-            <Text style={styles.withdrawBtnText}>Withdraw Funds</Text>
-          </LinearGradient>
-        </Pressable>
-
-        {/* Pending info bar */}
-        <View style={styles.pendingBar}>
-          <Ionicons name="time-outline" size={16} color={Colors.orange} />
-          <Text style={styles.pendingBarText}>
-            K{WALLET_DATA.pendingBalance.toLocaleString()} pending — clears after order delivery
-          </Text>
-        </View>
-
-        {/* ── REVENUE CHART ── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Revenue This Week</Text>
-            <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-              style={styles.weekBadge}>
-              <Text style={styles.weekBadgeText}>K{(WALLET_DATA.totalEarnings / 1000).toFixed(1)}K</Text>
-            </LinearGradient>
+            <View style={styles.balanceDivider} />
+            <View style={styles.balanceStat}>
+              <Text style={styles.balanceStatVal}>{sym}{Math.round(totalEarnings * 0.1).toLocaleString()}</Text>
+              <Text style={styles.balanceStatLabel}>Commission (10%)</Text>
+            </View>
           </View>
-          <RevenueChart />
-        </View>
+          <Pressable onPress={openWithdraw} style={styles.withdrawBtn}>
+            <Ionicons name="arrow-up-circle" size={18} color={Colors.pink} />
+            <Text style={styles.withdrawBtnText}>Withdraw Funds</Text>
+          </Pressable>
+        </LinearGradient>
 
-        {/* ── BREAKDOWN ── */}
+        {/* Revenue chart */}
         <View style={styles.section}>
-          <BreakdownBar />
-        </View>
-
-        {/* ── WITHDRAWAL HISTORY ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Withdrawal History</Text>
-          <View style={styles.historyList}>
-            {WITHDRAWAL_HISTORY.map((item, i) => (
-              <View
-                key={item.id}
-                style={[styles.historyItem, i < WITHDRAWAL_HISTORY.length - 1 && styles.historyItemBorder]}
-              >
-                <View style={styles.historyIconWrap}>
+          <Text style={styles.sectionTitle}>Revenue — This Week</Text>
+          <View style={styles.chart}>
+            {REVENUE_DATA.map((d, i) => (
+              <View key={i} style={styles.bar}>
+                <Text style={styles.barVal}>{d.label}</Text>
+                <View style={styles.barTrack}>
                   <LinearGradient
-                    colors={item.status === 'completed' ? ['#003B00', '#00C851'] : [Colors.surfaceElevated, Colors.surface]}
-                    style={styles.historyIcon}
-                  >
-                    <MaterialCommunityIcons
-                      name="bank-transfer-out"
-                      size={18}
-                      color={item.status === 'completed' ? '#fff' : Colors.orange}
-                    />
-                  </LinearGradient>
+                    colors={Gradients.primary}
+                    style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]}
+                  />
                 </View>
-                <View style={styles.historyInfo}>
-                  <Text style={styles.historyMethod}>{item.method}</Text>
-                  <Text style={styles.historyMeta}>{item.number} · {item.date}</Text>
-                </View>
-                <View style={styles.historyRight}>
-                  <Text style={styles.historyAmount}>K{item.amount.toLocaleString()}</Text>
-                  <View style={[
-                    styles.statusBadge,
-                    item.status === 'completed' ? styles.statusDone : styles.statusPending,
-                  ]}>
-                    <Text style={[
-                      styles.statusText,
-                      item.status === 'completed' ? styles.statusTextDone : styles.statusTextPending,
-                    ]}>
-                      {item.status === 'completed' ? 'Sent' : 'Pending'}
-                    </Text>
-                  </View>
-                </View>
+                <Text style={styles.barLabel}>{d.day}</Text>
               </View>
             ))}
           </View>
         </View>
 
-        {/* ── STATS GRID ── */}
-        <View style={styles.statsGrid}>
-          <StatCard icon="trending-up" label="This Month" value="K49.1K" color={Colors.pink} />
-          <StatCard icon="star" label="Top Day" value="Sat K12.4K" color={Colors.gold} />
-          <StatCard icon="people" label="Total Orders" value="186" color={Colors.purple} />
-          <StatCard icon="checkmark-circle" label="Completed" value="97%" color={Colors.sold} />
+        {/* Transaction history */}
+        <View style={[styles.section, { paddingBottom: 0 }]}>
+          <Text style={styles.sectionTitle}>Transaction History</Text>
+          {loading ? (
+            <ActivityIndicator color={Colors.pink} style={{ marginTop: 20 }} />
+          ) : transactions.length === 0 ? (
+            <Text style={{ color: Colors.textMuted, textAlign: 'center', marginTop: 16 }}>No transactions yet</Text>
+          ) : (
+            transactions.map(tx => (
+              <View key={tx.id} style={styles.txItem}>
+                <View style={[styles.txIcon, { backgroundColor: (tx.type === 'credit') ? 'rgba(0,200,81,0.1)' : 'rgba(255,59,48,0.1)' }]}>
+                  <Ionicons
+                    name={(tx.type === 'credit') ? 'arrow-down' : 'arrow-up'}
+                    size={16}
+                    color={(tx.type === 'credit') ? Colors.success : Colors.error}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.txDesc} numberOfLines={1}>{tx.description || tx.type}</Text>
+                  <Text style={styles.txDate}>{new Date(tx.created_at).toLocaleDateString()}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[styles.txAmount, { color: tx.type === 'credit' ? Colors.success : Colors.error }]}>
+                    {tx.type === 'credit' ? '+' : ''}{sym}{Math.abs(tx.amount).toLocaleString()}
+                  </Text>
+                  <Text style={styles.txStatus}>{tx.status}</Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
-
-        <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Withdraw Modal */}
-      <WithdrawModal
-        visible={showWithdraw}
-        onClose={() => setShowWithdraw(false)}
-        maxAmount={WALLET_DATA.availableBalance}
-      />
+      {/* WITHDRAW MODAL */}
+      {showWithdraw && (
+        <Animated.View style={[styles.modal, { transform: [{ translateY: modalY }] }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Withdraw Funds</Text>
+            <Pressable onPress={closeWithdraw} hitSlop={8}>
+              <Ionicons name="close" size={24} color={Colors.textSecondary} />
+            </Pressable>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalLabel}>Available: {sym}{balance.toLocaleString()}</Text>
+
+            {/* Provider */}
+            <Text style={styles.modalSectionLabel}>Select Provider</Text>
+            {PROVIDERS.map(p => (
+              <Pressable key={p.id} onPress={() => setProvider(p.id)}
+                style={[styles.providerRow, provider === p.id && styles.providerRowActive]}>
+                <Text style={styles.providerIcon}>{p.icon}</Text>
+                <Text style={[styles.providerLabel, provider === p.id && { color: '#fff' }]}>{p.label}</Text>
+                {provider === p.id && <Ionicons name="checkmark-circle" size={20} color={Colors.pink} />}
+              </Pressable>
+            ))}
+
+            {/* Phone */}
+            <Text style={styles.modalSectionLabel}>Phone Number</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="+260 97X XXX XXX"
+              placeholderTextColor={Colors.textMuted}
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+            />
+
+            {/* Amount */}
+            <Text style={styles.modalSectionLabel}>Amount ({sym})</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Enter amount"
+              placeholderTextColor={Colors.textMuted}
+              value={withdrawAmount}
+              onChangeText={setWithdrawAmount}
+              keyboardType="numeric"
+            />
+
+            <Pressable onPress={handleWithdraw} disabled={withdrawing}>
+              <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                style={[styles.withdrawSubmit, Shadow.glow]}>
+                {withdrawing
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={styles.withdrawSubmitText}>Confirm Withdrawal</Text>
+                }
+              </LinearGradient>
+            </Pressable>
+
+            <View style={styles.paymentNote}>
+              <Ionicons name="information-circle-outline" size={14} color={Colors.textMuted} />
+              <Text style={styles.paymentNoteText}>
+                {/* Insert payment gateway API here */}
+                Processed within 24 hours. Platform fee of 10% already deducted from earnings.
+              </Text>
+            </View>
+            <View style={{ height: 24 }} />
+          </ScrollView>
+        </Animated.View>
+      )}
+
+      {/* SUCCESS OVERLAY */}
+      {success && (
+        <View style={styles.successOverlay}>
+          <Animated.View style={[styles.successCard, { transform: [{ scale: successScale }] }]}>
+            <LinearGradient colors={Gradients.primary} style={styles.successIcon}>
+              <Ionicons name="checkmark" size={36} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.successTitle}>Withdrawal Requested!</Text>
+            <Text style={styles.successSub}>Funds will arrive within 24 hours</Text>
+          </Animated.View>
+        </View>
+      )}
     </View>
   );
 }
 
-function StatCard({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
-  return (
-    <View style={stat.card}>
-      <View style={[stat.iconWrap, { backgroundColor: color + '22' }]}>
-        <Ionicons name={icon as any} size={20} color={color} />
-      </View>
-      <Text style={stat.value}>{value}</Text>
-      <Text style={stat.label}>{label}</Text>
-    </View>
-  );
-}
-
-const stat = StyleSheet.create({
-  card: {
-    width: (width - 48) / 2,
-    backgroundColor: Colors.surface, borderRadius: Radius.lg,
-    padding: 16, gap: 6, borderWidth: 1, borderColor: Colors.border,
-  },
-  iconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  value: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
-  label: { color: Colors.textMuted, fontSize: Typography.xs },
-});
+const MOCK_TRANSACTIONS: DbWalletTransaction[] = [
+  { id: 't1', user_id: '', type: 'credit', amount: 1620, description: 'Order SHP-001 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 3600000).toISOString() },
+  { id: 't2', user_id: '', type: 'credit', amount: 810, description: 'Order SHP-002 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: 't3', user_id: '', type: 'withdrawal', amount: -2000, description: 'Withdrawal to MTN +260977001122', order_id: null, status: 'completed', created_at: new Date(Date.now() - 172800000).toISOString() },
+  { id: 't4', user_id: '', type: 'credit', amount: 1620, description: 'Order SHP-003 — after 10% commission', order_id: null, status: 'completed', created_at: new Date(Date.now() - 259200000).toISOString() },
+];
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  headerTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.bold },
-  scroll: { padding: 16, gap: 16 },
+  headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
 
-  // Hero card
-  heroCardWrap: { borderRadius: Radius.xl, overflow: 'hidden', ...Shadow.glow },
-  heroCard: { padding: 24, borderRadius: Radius.xl, gap: 6, overflow: 'hidden' },
-  glowBlob: {
-    position: 'absolute', width: 200, height: 200,
-    borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.15)',
-    top: -60, right: -60,
-  },
-  heroLabel: { color: 'rgba(255,255,255,0.75)', fontSize: Typography.sm, fontWeight: Typography.semibold },
-  heroAmount: { color: '#fff', fontSize: 44, fontWeight: Typography.black, letterSpacing: -1 },
-  heroDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginVertical: 12 },
-  heroSubRow: { flexDirection: 'row', alignItems: 'center' },
-  heroSubItem: { flex: 1, alignItems: 'center', gap: 3 },
-  heroSubDivider: { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.2)' },
-  heroSubLabel: { color: 'rgba(255,255,255,0.6)', fontSize: Typography.xs, fontWeight: Typography.medium },
-  heroSubValue: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.black },
-  heroSubValuePending: { color: Colors.gold, fontSize: Typography.base, fontWeight: Typography.black },
-
-  // Withdraw button
-  withdrawBtnWrap: { borderRadius: Radius.pill, overflow: 'hidden' },
+  balanceCard: { margin: 16, borderRadius: Radius.xl, padding: 24, gap: 14 },
+  balanceLabel: { color: 'rgba(255,255,255,0.8)', fontSize: Typography.sm },
+  balanceAmount: { color: '#fff', fontSize: 46, fontWeight: Typography.black, letterSpacing: -1 },
+  balanceStats: { flexDirection: 'row', alignItems: 'center' },
+  balanceStat: { flex: 1, gap: 3 },
+  balanceStatVal: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
+  balanceStatLabel: { color: 'rgba(255,255,255,0.7)', fontSize: Typography.xs },
+  balanceDivider: { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 16 },
   withdrawBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    paddingVertical: 16, borderRadius: Radius.pill,
-  },
-  withdrawBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-
-  // Pending bar
-  pendingBar: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(255,140,0,0.08)', borderRadius: Radius.lg, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(255,140,0,0.2)',
-    marginTop: -4,
+    backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: Radius.pill,
+    paddingHorizontal: 20, paddingVertical: 11, alignSelf: 'flex-start',
   },
-  pendingBarText: { flex: 1, color: Colors.orange, fontSize: Typography.xs, lineHeight: 18 },
+  withdrawBtnText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
 
-  // Section
-  section: {
+  section: { paddingHorizontal: 16, marginBottom: 20 },
+  sectionTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black, marginBottom: 14 },
+
+  chart: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     backgroundColor: Colors.surface, borderRadius: Radius.xl,
-    padding: 18, gap: 12, borderWidth: 1, borderColor: Colors.border,
+    padding: 16, height: 160, borderWidth: 1, borderColor: Colors.border,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sectionTitle: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  weekBadge: { borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 5 },
-  weekBadgeText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.black },
+  bar: { flex: 1, alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' },
+  barVal: { color: Colors.textMuted, fontSize: 8, textAlign: 'center' },
+  barTrack: { flex: 1, width: '100%', backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
+  barFill: { width: '100%', borderRadius: 4 },
+  barLabel: { color: Colors.textSecondary, fontSize: 10, fontWeight: Typography.semibold },
 
-  // History
-  historyList: { gap: 0 },
-  historyItem: {
+  txItem: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  historyItemBorder: { borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  historyIconWrap: {},
-  historyIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  historyInfo: { flex: 1, gap: 3 },
-  historyMethod: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold },
-  historyMeta: { color: Colors.textMuted, fontSize: Typography.xs },
-  historyRight: { alignItems: 'flex-end', gap: 4 },
-  historyAmount: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.black },
-  statusBadge: { borderRadius: Radius.pill, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
-  statusDone: { backgroundColor: 'rgba(0,200,81,0.1)', borderColor: Colors.sold },
-  statusPending: { backgroundColor: 'rgba(255,140,0,0.1)', borderColor: Colors.orange },
-  statusText: { fontSize: 10, fontWeight: Typography.bold },
-  statusTextDone: { color: Colors.sold },
-  statusTextPending: { color: Colors.orange },
+  txIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  txDesc: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.semibold },
+  txDate: { color: Colors.textMuted, fontSize: Typography.xs, marginTop: 2 },
+  txAmount: { fontSize: Typography.base, fontWeight: Typography.black },
+  txStatus: { color: Colors.textMuted, fontSize: Typography.xs, marginTop: 2, textTransform: 'capitalize' },
 
-  // Stats grid
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  modal: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#161616', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, maxHeight: '85%',
+  },
+  modalHandle: { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
+  modalLabel: { color: Colors.textSecondary, fontSize: Typography.sm, marginBottom: 12 },
+  modalSectionLabel: { color: Colors.textSecondary, fontSize: Typography.xs, fontWeight: Typography.bold, letterSpacing: 1, marginTop: 14, marginBottom: 8 },
+  providerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: 14,
+    marginBottom: 8, borderWidth: 1.5, borderColor: Colors.border,
+  },
+  providerRowActive: { borderColor: Colors.pink, backgroundColor: 'rgba(255,77,166,0.06)' },
+  providerIcon: { fontSize: 22 },
+  providerLabel: { flex: 1, color: Colors.textSecondary, fontSize: Typography.base, fontWeight: Typography.semibold },
+  modalInput: {
+    backgroundColor: Colors.surfaceElevated, borderRadius: Radius.md,
+    borderWidth: 1, borderColor: Colors.border,
+    color: '#fff', fontSize: Typography.base,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  withdrawSubmit: { borderRadius: Radius.pill, paddingVertical: 16, alignItems: 'center', marginTop: 16, minHeight: 52, justifyContent: 'center' },
+  withdrawSubmitText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
+  paymentNote: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: Colors.surface, borderRadius: Radius.md, padding: 12, marginTop: 12,
+  },
+  paymentNoteText: { color: Colors.textMuted, fontSize: Typography.xs, flex: 1, lineHeight: 17 },
+
+  successOverlay: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)',
+    alignItems: 'center', justifyContent: 'center', padding: 32,
+  },
+  successCard: {
+    backgroundColor: Colors.surface, borderRadius: 24, padding: 32,
+    alignItems: 'center', gap: 14, borderWidth: 1, borderColor: Colors.pink, ...Shadow.glow,
+  },
+  successIcon: { width: 70, height: 70, borderRadius: 35, alignItems: 'center', justifyContent: 'center' },
+  successTitle: { color: '#fff', fontSize: Typography.xxl, fontWeight: Typography.black },
+  successSub: { color: Colors.textSecondary, fontSize: Typography.base, textAlign: 'center' },
 });

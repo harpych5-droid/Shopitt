@@ -1,284 +1,289 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, ScrollView, Dimensions,
+  View, Text, StyleSheet, Pressable, FlatList, ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
-import { SELLER_ORDERS, REVENUE_DATA } from '@/constants/data';
 import { useApp } from '@/contexts/AppContext';
+import { OrderService } from '@/services/orderService';
+import { DbOrder } from '@/lib/types';
+import { SELLER_ORDERS, REVENUE_DATA } from '@/constants/data';
 
-const { width } = Dimensions.get('window');
-const BAR_WIDTH = (width - 80) / 7;
-const MAX_REV = Math.max(...REVENUE_DATA.map(d => d.value));
+type StatusFilter = 'all' | 'new' | 'pending' | 'confirmed' | 'shipped' | 'delivered';
 
-type Filter = 'all' | 'pending' | 'confirmed' | 'delivered';
+const STATUS_COLORS: Record<string, string> = {
+  new: Colors.pink,
+  pending: Colors.orange,
+  confirmed: Colors.verified,
+  shipped: Colors.purple,
+  delivered: Colors.success,
+};
+
+const STATUS_NEXT: Record<string, string> = {
+  new: 'Confirm Order',
+  pending: 'Mark Confirmed',
+  confirmed: 'Mark Shipped',
+  shipped: 'Mark Delivered',
+  delivered: '',
+};
 
 export default function SellerDashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useApp();
-  const [filter, setFilter] = useState<Filter>('all');
-  const [orders, setOrders] = useState(SELLER_ORDERS);
+  const { authUser, profile, currency } = useApp();
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState<StatusFilter>('all');
+  const [updating, setUpdating] = useState<string | null>(null);
+  const sym = currency.symbol;
 
-  const confirmOrder = (id: string) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'confirmed' as const, isNew: false } : o));
+  useEffect(() => { loadOrders(); }, [authUser]);
+
+  const loadOrders = async () => {
+    setLoading(true);
+    if (authUser) {
+      const data = await OrderService.getForSeller(authUser.id);
+      setOrders(data.length > 0 ? data : SELLER_ORDERS);
+    } else {
+      setOrders(SELLER_ORDERS);
+    }
+    setLoading(false);
   };
-  const deliverOrder = (id: string) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'delivered' as const } : o));
+
+  const handleStatusUpdate = async (order: any) => {
+    const nextMap: Record<string, DbOrder['status']> = {
+      new: 'confirmed',
+      pending: 'confirmed',
+      confirmed: 'shipped',
+      shipped: 'delivered',
+    };
+    const next = nextMap[order.status];
+    if (!next) return;
+
+    setUpdating(order.id);
+    if (authUser) {
+      await OrderService.updateStatus(order.id, next, authUser.id);
+    }
+    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: next } : o));
+    setUpdating(null);
   };
 
   const filtered = filter === 'all' ? orders : orders.filter(o => o.status === filter);
-  const counts = {
-    pending: orders.filter(o => o.status === 'pending').length,
-    confirmed: orders.filter(o => o.status === 'confirmed').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
-  };
 
-  const STATUS_COLORS: Record<string, string> = {
-    pending: Colors.orange,
-    confirmed: Colors.verified,
-    delivered: Colors.success,
-  };
+  // Stats
+  const totalRevenue = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + ((o.total || 0) * 0.9), 0);
+  const pendingOrders = orders.filter(o => ['new', 'pending', 'confirmed'].includes(o.status)).length;
+  const completedOrders = orders.filter(o => o.status === 'delivered').length;
+  const totalOrders = orders.length;
+
+  const barMax = Math.max(...REVENUE_DATA.map(d => d.value));
+
+  const STATUS_TABS: StatusFilter[] = ['all', 'new', 'pending', 'confirmed', 'shipped', 'delivered'];
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </Pressable>
-        <View style={styles.headerCenter}>
-          <LinearGradient colors={Gradients.primary} style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>{(user?.username || 'S').charAt(0).toUpperCase()}</Text>
-          </LinearGradient>
-          <Text style={styles.headerTitle}>Seller Dashboard</Text>
-        </View>
-        <Pressable hitSlop={8}>
-          <Ionicons name="shield-outline" size={24} color="#fff" />
+        <Text style={styles.headerTitle}>Seller Dashboard</Text>
+        <Pressable onPress={() => router.push('/wallet')} hitSlop={8}>
+          <Ionicons name="wallet-outline" size={24} color={Colors.pink} />
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Revenue Card */}
-        <View style={styles.revenueCard}>
-          <View style={styles.revHeader}>
-            <Text style={styles.revLabel}>Revenue This Week</Text>
-            <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-              style={styles.revAmount}>
-              <Text style={styles.revAmountText}>K 49,100</Text>
-            </LinearGradient>
-          </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+        {/* Stats row */}
+        <View style={styles.statsRow}>
+          <StatCard label="Revenue" value={`${sym}${Math.round(totalRevenue).toLocaleString()}`} icon="trending-up" color={Colors.pink} />
+          <StatCard label="Orders" value={String(totalOrders)} icon="bag-outline" color={Colors.purple} />
+          <StatCard label="Pending" value={String(pendingOrders)} icon="time-outline" color={Colors.orange} />
+          <StatCard label="Done" value={String(completedOrders)} icon="checkmark-circle-outline" color={Colors.success} />
+        </View>
 
-          {/* Bar Chart */}
+        {/* Revenue chart */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Revenue — This Week</Text>
           <View style={styles.chart}>
             {REVENUE_DATA.map((d, i) => (
-              <View key={d.day} style={styles.barCol}>
-                <View style={styles.barWrap}>
-                  <LinearGradient
-                    colors={i === 5 ? Gradients.primary : ['#3A2060', '#2A1545']}
-                    style={[styles.bar, { height: Math.max(20, (d.value / MAX_REV) * 100) }]}
-                  />
+              <View key={i} style={styles.bar}>
+                <Text style={styles.barLabel}>{d.label}</Text>
+                <View style={styles.barTrack}>
+                  <LinearGradient colors={Gradients.primary} style={[styles.barFill, { height: `${(d.value / barMax) * 100}%` as any }]} />
                 </View>
-                <Text style={[styles.barDay, i === 5 && { color: Colors.pink }]}>{d.day}</Text>
-                <Text style={[styles.barVal, i === 5 && { color: Colors.pink }]}>{d.label}</Text>
+                <Text style={styles.barDay}>{d.day}</Text>
               </View>
             ))}
           </View>
-
-          <View style={styles.revFooter}>
-            <View style={styles.revFooterLeft}>
-              <View style={styles.peakDot} />
-              <Text style={styles.peakText}>Peak: Saturday</Text>
-            </View>
-            <Text style={styles.growthText}>↗ +28% vs last week</Text>
-          </View>
         </View>
-
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          {[
-            { label: 'Pending', value: counts.pending, color: Colors.orange },
-            { label: 'Confirmed', value: counts.confirmed, color: Colors.verified },
-            { label: 'Delivered', value: counts.delivered, color: Colors.success },
-            { label: 'Revenue', value: 'K49K', color: Colors.pink },
-          ].map(s => (
-            <View key={s.label} style={[styles.statCard, { borderColor: s.color }]}>
-              <Text style={[styles.statNum, { color: s.color }]}>{s.value}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Filter Pills */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}>
-          {([
-            ['all', `All (${orders.length})`],
-            ['pending', `Pending (${counts.pending})`],
-            ['confirmed', `Confirmed (${counts.confirmed})`],
-            ['delivered', `Delivered (${counts.delivered})`],
-          ] as [Filter, string][]).map(([f, label]) => (
-            <Pressable key={f} onPress={() => setFilter(f)}>
-              {filter === f ? (
-                <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                  style={styles.filterPill}>
-                  <Text style={[styles.filterText, { color: '#fff' }]}>{label}</Text>
-                </LinearGradient>
-              ) : (
-                <View style={styles.filterPillInactive}>
-                  <Text style={styles.filterText}>{label}</Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
-        </ScrollView>
 
         {/* Orders */}
-        <View style={styles.orders}>
-          {filtered.map(order => (
-            <View key={order.id} style={[styles.orderCard, order.isNew && styles.orderCardNew]}>
-              {order.isNew && (
-                <View style={styles.newBadge}>
-                  <Text style={styles.newBadgeText}>🔥 NEW ORDER</Text>
-                </View>
-              )}
-
-              <View style={styles.orderHeader}>
-                <Image source={{ uri: order.buyerAvatar }} style={styles.buyerAvatar} contentFit="cover" />
-                <View style={styles.orderHeaderInfo}>
-                  <Text style={styles.buyerName}>{order.buyer}</Text>
-                  <Text style={styles.orderId}>{order.id}</Text>
-                </View>
-                <View style={[styles.statusBadge, { borderColor: STATUS_COLORS[order.status] }]}>
-                  <Text style={[styles.statusText, { color: STATUS_COLORS[order.status] }]}>
-                    {order.time}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Orders</Text>
+          {/* Filter tabs */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {STATUS_TABS.map(s => (
+                <Pressable key={s} onPress={() => setFilter(s)}
+                  style={[styles.filterTab, filter === s && styles.filterTabActive]}>
+                  <Text style={[styles.filterTabText, filter === s && styles.filterTabTextActive]}>
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                    {s === 'all' ? ` (${totalOrders})` : ` (${orders.filter(o => o.status === s).length})`}
                   </Text>
-                </View>
-              </View>
-
-              <View style={styles.orderItem}>
-                <Ionicons name="cube-outline" size={16} color={Colors.textMuted} />
-                <Text style={styles.orderItemName}>{order.product}</Text>
-                <Text style={styles.orderQty}>×{order.qty}</Text>
-              </View>
-
-              <View style={styles.orderFooter}>
-                <View>
-                  <Text style={styles.orderTotalLabel}>Order Total</Text>
-                  <Text style={styles.orderTotal}>{order.total}</Text>
-                </View>
-                <Text style={styles.orderLocation}>📍 {order.location}</Text>
-              </View>
-
-              {order.status === 'pending' && (
-                <Pressable onPress={() => confirmOrder(order.id)}>
-                  <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                    style={styles.actionBtn}>
-                    <MaterialIcons name="check-circle" size={18} color="#fff" />
-                    <Text style={styles.actionBtnText}>Confirm Order</Text>
-                  </LinearGradient>
                 </Pressable>
-              )}
-
-              {order.status === 'confirmed' && (
-                <Pressable onPress={() => deliverOrder(order.id)}
-                  style={[styles.actionBtn, { backgroundColor: Colors.success, borderRadius: Radius.pill }]}>
-                  <Ionicons name="bicycle-outline" size={18} color="#fff" />
-                  <Text style={styles.actionBtnText}>Mark as Delivered</Text>
-                </Pressable>
-              )}
-
-              {order.status === 'delivered' && (
-                <View style={[styles.actionBtn, { backgroundColor: 'rgba(0,200,81,0.1)', borderRadius: Radius.pill, borderWidth: 1, borderColor: Colors.success }]}>
-                  <MaterialIcons name="check-circle" size={18} color={Colors.success} />
-                  <Text style={[styles.actionBtnText, { color: Colors.success }]}>Delivered</Text>
-                </View>
-              )}
+              ))}
             </View>
-          ))}
+          </ScrollView>
+
+          {loading ? (
+            <ActivityIndicator color={Colors.pink} />
+          ) : filtered.length === 0 ? (
+            <Text style={{ color: Colors.textMuted, textAlign: 'center', padding: 20 }}>No orders in this status</Text>
+          ) : (
+            filtered.map(order => (
+              <View key={order.id} style={styles.orderCard}>
+                <View style={styles.orderTop}>
+                  {/* Buyer avatar */}
+                  {(order.buyer?.avatar_url || order.buyerAvatar) ? (
+                    <Image source={{ uri: order.buyer?.avatar_url || order.buyerAvatar }} style={styles.buyerAvatar} contentFit="cover" />
+                  ) : (
+                    <LinearGradient colors={Gradients.primary} style={styles.buyerAvatarFallback}>
+                      <Text style={{ color: '#fff', fontWeight: Typography.bold }}>
+                        {(order.buyer?.username || order.buyer || 'U').charAt(1)?.toUpperCase() || 'U'}
+                      </Text>
+                    </LinearGradient>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.orderId}>{order.order_number || order.id}</Text>
+                    <Text style={styles.orderBuyer}>{order.buyer?.username ? `@${order.buyer.username}` : (order.buyer || 'Buyer')}</Text>
+                    <Text style={styles.orderProduct} numberOfLines={1}>{order.product || (order.items?.[0]?.title) || 'Product'}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <Text style={styles.orderTotal}>{order.total ? `${sym}${order.total}` : order.total || 'K---'}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: `${STATUS_COLORS[order.status]}22`, borderColor: `${STATUS_COLORS[order.status]}44` }]}>
+                      <Text style={[styles.statusText, { color: STATUS_COLORS[order.status] }]}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Location + time */}
+                <View style={styles.orderMeta}>
+                  <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                  <Text style={styles.orderMetaText}>{order.location || order.delivery_address?.city || 'Unknown'}</Text>
+                  <Text style={styles.orderMetaText}>· {order.time || formatTime(order.created_at)}</Text>
+                  {order.isNew && (
+                    <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
+                  )}
+                </View>
+
+                {/* Action */}
+                {order.status !== 'delivered' && (
+                  <Pressable
+                    onPress={() => handleStatusUpdate(order)}
+                    disabled={updating === order.id}
+                    style={{ marginTop: 10 }}
+                  >
+                    <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
+                      style={styles.orderActionBtn}>
+                      {updating === order.id
+                        ? <ActivityIndicator color="#fff" size="small" />
+                        : <Text style={styles.orderActionText}>{STATUS_NEXT[order.status] || 'Update'}</Text>
+                      }
+                    </LinearGradient>
+                  </Pressable>
+                )}
+              </View>
+            ))
+          )}
         </View>
       </ScrollView>
     </View>
   );
 }
 
+function StatCard({ label, value, icon, color }: any) {
+  return (
+    <View style={[styles.statCard, { borderColor: `${color}33` }]}>
+      <View style={[styles.statIcon, { backgroundColor: `${color}18` }]}>
+        <Ionicons name={icon} size={18} color={color} />
+      </View>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function formatTime(ts: string | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const diffMs = Date.now() - d.getTime();
+  const h = Math.floor(diffMs / 3600000);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
-  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  headerAvatarText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  headerTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.bold },
-  revenueCard: {
-    margin: 16, backgroundColor: Colors.surface, borderRadius: Radius.xl,
-    padding: 16, borderWidth: 1, borderColor: Colors.border,
-  },
-  revHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  revLabel: { color: Colors.textSecondary, fontSize: Typography.base },
-  revAmount: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: Radius.pill },
-  revAmountText: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
-  chart: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 120, marginBottom: 8 },
-  barCol: { alignItems: 'center', gap: 4, flex: 1 },
-  barWrap: { height: 100, justifyContent: 'flex-end', width: '80%' },
-  bar: { width: '100%', borderRadius: 6 },
-  barDay: { color: Colors.textMuted, fontSize: 9, fontWeight: Typography.semibold },
-  barVal: { color: Colors.textMuted, fontSize: 9 },
-  revFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  revFooterLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  peakDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.pink },
-  peakText: { color: Colors.textSecondary, fontSize: Typography.sm },
-  growthText: { color: Colors.success, fontSize: Typography.sm, fontWeight: Typography.semibold },
-  statsGrid: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 12 },
+  headerTitle: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
+  statsRow: { flexDirection: 'row', gap: 8, padding: 16 },
   statCard: {
     flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.lg,
-    padding: 14, alignItems: 'center', gap: 4,
-    borderWidth: 1.5,
+    padding: 12, alignItems: 'center', gap: 6,
+    borderWidth: 1,
   },
-  statNum: { fontSize: Typography.xl, fontWeight: Typography.black },
-  statLabel: { color: Colors.textSecondary, fontSize: Typography.xs, fontWeight: Typography.medium },
-  filterRow: { paddingHorizontal: 16, gap: 8, marginBottom: 12 },
-  filterPill: { borderRadius: Radius.pill, paddingHorizontal: 16, paddingVertical: 9 },
-  filterPillInactive: {
-    borderRadius: Radius.pill, paddingHorizontal: 16, paddingVertical: 9,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  filterText: { color: Colors.textSecondary, fontSize: Typography.sm, fontWeight: Typography.medium },
-  orders: { paddingHorizontal: 16, gap: 12, paddingBottom: 32 },
-  orderCard: {
+  statIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  statValue: { color: '#fff', fontSize: Typography.md, fontWeight: Typography.black },
+  statLabel: { color: Colors.textMuted, fontSize: Typography.xs },
+  section: { paddingHorizontal: 16, marginBottom: 16 },
+  sectionTitle: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black, marginBottom: 12 },
+  chart: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     backgroundColor: Colors.surface, borderRadius: Radius.xl,
-    padding: 16, gap: 12, borderWidth: 1, borderColor: Colors.border,
+    padding: 16, height: 140, borderWidth: 1, borderColor: Colors.border,
   },
-  orderCardNew: { borderColor: Colors.pink },
-  newBadge: {
-    backgroundColor: 'rgba(255,60,0,0.15)', borderRadius: Radius.pill,
-    paddingHorizontal: 12, paddingVertical: 5, alignSelf: 'flex-start',
-    borderWidth: 1, borderColor: Colors.error,
+  bar: { flex: 1, alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' },
+  barLabel: { color: Colors.textMuted, fontSize: 8, textAlign: 'center' },
+  barTrack: { flex: 1, width: '100%', backgroundColor: Colors.surfaceElevated, borderRadius: 4, overflow: 'hidden', justifyContent: 'flex-end' },
+  barFill: { width: '100%', borderRadius: 4 },
+  barDay: { color: Colors.textSecondary, fontSize: 9, fontWeight: Typography.semibold },
+  filterTab: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: Radius.pill,
+    backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border,
   },
-  newBadgeText: { color: Colors.error, fontSize: Typography.xs, fontWeight: Typography.bold },
-  orderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  buyerAvatar: { width: 40, height: 40, borderRadius: 20 },
-  orderHeaderInfo: { flex: 1 },
-  buyerName: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  orderId: { color: Colors.textMuted, fontSize: Typography.xs },
-  statusBadge: { borderWidth: 1, borderRadius: Radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
-  statusText: { fontSize: Typography.xs, fontWeight: Typography.semibold },
-  orderItem: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.surfaceElevated, borderRadius: Radius.md, padding: 10 },
-  orderItemName: { flex: 1, color: '#fff', fontSize: Typography.sm, fontWeight: Typography.medium },
-  orderQty: { color: Colors.textMuted, fontSize: Typography.sm },
-  orderFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  orderTotalLabel: { color: Colors.textSecondary, fontSize: Typography.xs },
-  orderTotal: { color: Colors.pink, fontSize: Typography.xxl, fontWeight: Typography.black },
-  orderLocation: { color: Colors.textSecondary, fontSize: Typography.sm },
-  actionBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, borderRadius: Radius.pill, paddingVertical: 14,
+  filterTabActive: { borderColor: Colors.pink, backgroundColor: 'rgba(255,77,166,0.1)' },
+  filterTabText: { color: Colors.textSecondary, fontSize: Typography.xs, fontWeight: Typography.semibold },
+  filterTabTextActive: { color: Colors.pink },
+  orderCard: {
+    backgroundColor: Colors.surface, borderRadius: Radius.lg,
+    padding: 14, marginBottom: 10, borderWidth: 1, borderColor: Colors.border,
   },
-  actionBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
+  orderTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  buyerAvatar: { width: 42, height: 42, borderRadius: 21 },
+  buyerAvatarFallback: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  orderId: { color: Colors.textMuted, fontSize: Typography.xs, fontWeight: Typography.bold, letterSpacing: 1 },
+  orderBuyer: { color: Colors.pink, fontSize: Typography.sm, fontWeight: Typography.semibold },
+  orderProduct: { color: '#fff', fontSize: Typography.sm, marginTop: 2 },
+  orderTotal: { color: Colors.pink, fontSize: Typography.lg, fontWeight: Typography.black },
+  statusBadge: {
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill,
+    borderWidth: 1,
+  },
+  statusText: { fontSize: Typography.xs, fontWeight: Typography.bold },
+  orderMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+  orderMetaText: { color: Colors.textMuted, fontSize: Typography.xs },
+  newBadge: { backgroundColor: Colors.pink, borderRadius: Radius.pill, paddingHorizontal: 6, paddingVertical: 2 },
+  newBadgeText: { color: '#fff', fontSize: 9, fontWeight: Typography.black },
+  orderActionBtn: { borderRadius: Radius.pill, paddingVertical: 10, alignItems: 'center' },
+  orderActionText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
 });

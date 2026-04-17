@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, ScrollView, FlatList, Dimensions,
+  View, Text, StyleSheet, Pressable, FlatList, ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,139 +9,208 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Gradients, Radius, Typography, Shadow } from '@/constants/theme';
-import { PROFILE_POSTS } from '@/constants/data';
-import { BottomTabBar } from '@/components/layout/BottomTabBar';
 import { useApp } from '@/contexts/AppContext';
-
-const { width } = Dimensions.get('window');
-const GRID_ITEM = (width - 4) / 3;
+import { PostService } from '@/services/postService';
+import { BottomTabBar } from '@/components/layout/BottomTabBar';
+import { PROFILE_POSTS } from '@/constants/data';
+import { DbPost } from '@/lib/types';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useApp();
+  const { authUser, profile, logout, currency } = useApp();
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'saved'>('posts');
 
-  const formatNum = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+  useEffect(() => {
+    loadPosts();
+  }, [authUser]);
+
+  const loadPosts = async () => {
+    setLoading(true);
+    if (authUser) {
+      const data = await PostService.getByUser(authUser.id);
+      setPosts(data.length > 0 ? data : PROFILE_POSTS);
+    } else {
+      setPosts(PROFILE_POSTS);
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/auth');
+  };
+
+  const sym = currency.symbol;
+
+  const displayProfile = profile || {
+    username: 'the_joystreet_shop',
+    display_name: 'Joy Street',
+    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face',
+    country: 'Zambia',
+    bio: 'Fashion drops weekly 🔥 Fast shipping | Authentic only',
+    verified: true,
+    followers_count: 15900,
+    following_count: 610,
+    posts_count: posts.length || 6,
+    sold_count: 186,
+    rating: 4.6,
+    is_seller: true,
+    wallet_balance: 4850,
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}>
         {/* Header */}
         <View style={styles.header}>
-          <Pressable onPress={() => router.push('/menu')} hitSlop={8}>
-            <Ionicons name="menu" size={26} color="#fff" />
-          </Pressable>
-          <Text style={styles.username}>@{user?.username || 'the_joystreet_shop'}</Text>
-          <Pressable onPress={() => router.push('/seller-dashboard')} hitSlop={8}>
-            <Ionicons name="bar-chart-outline" size={24} color="#fff" />
-          </Pressable>
+          <View style={styles.headerLeft}>
+            <Text style={styles.username}>@{displayProfile.username}</Text>
+            {displayProfile.verified && (
+              <MaterialIcons name="verified" size={16} color={Colors.verified} />
+            )}
+          </View>
+          <View style={styles.headerActions}>
+            <Pressable onPress={() => router.push('/menu')} hitSlop={8}>
+              <Ionicons name="menu-outline" size={26} color="#fff" />
+            </Pressable>
+          </View>
         </View>
 
-        {/* Cover gradient */}
-        <LinearGradient
-          colors={['#1A0A2E', '#0E0E0E']}
-          style={styles.cover}
-        />
-
-        {/* Avatar + stats */}
-        <View style={styles.profileInfo}>
-          <View style={styles.avatarRow}>
-            <View style={styles.avatarWrap}>
-              <LinearGradient colors={Gradients.primary} style={styles.avatarRing}>
-                <Image
-                  source={{ uri: user?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face' }}
-                  style={styles.avatar}
-                  contentFit="cover"
-                />
+        {/* Avatar + Stats */}
+        <View style={styles.profileRow}>
+          <View style={styles.avatarWrap}>
+            {displayProfile.avatar_url ? (
+              <Image source={{ uri: displayProfile.avatar_url }} style={styles.avatar} contentFit="cover" />
+            ) : (
+              <LinearGradient colors={Gradients.primary} style={styles.avatarFallback}>
+                <Text style={styles.avatarFallbackText}>
+                  {(displayProfile.username || 'U').charAt(0).toUpperCase()}
+                </Text>
               </LinearGradient>
-            </View>
+            )}
+            {displayProfile.verified && (
+              <View style={styles.verifiedBadge}>
+                <MaterialIcons name="verified" size={14} color="#fff" />
+              </View>
+            )}
           </View>
 
           {/* Stats */}
-          <View style={styles.statsCard}>
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{user?.posts || 6}</Text>
-              <Text style={styles.statLabel}>POSTS</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{formatNum(user?.followers || 15900)}</Text>
-              <Text style={styles.statLabel}>FOLLOWERS</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{user?.following || 610}</Text>
-              <Text style={styles.statLabel}>FOLLOWING</Text>
-            </View>
-          </View>
-
-          {/* Name + bio */}
-          <Text style={styles.displayName}>{user?.displayName || 'Joy Street'}</Text>
-          <Text style={styles.bio}>
-            🔥 Premium Accessories | {user?.location || 'Livingstone'} | 100+ items sold monthly
-          </Text>
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={14} color={Colors.textMuted} />
-            <Text style={styles.locationText}>{user?.location || 'Livingstone'}</Text>
-          </View>
-
-          {/* Badges */}
-          <View style={styles.badges}>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>✓ {user?.sold || 186}+ Sold</Text>
-            </View>
-            <View style={[styles.badge, styles.badgeGold]}>
-              <Text style={[styles.badgeText, { color: Colors.gold }]}>★ {user?.rating || 4.6}</Text>
-            </View>
-            <View style={[styles.badge, styles.badgeBlue]}>
-              <Text style={[styles.badgeText, { color: Colors.verified }]}>⚡ Ships 24h</Text>
-            </View>
-          </View>
-
-          {/* CTA row */}
-          <View style={styles.ctaRow}>
-            <Pressable style={{ flex: 1 }}>
-              <LinearGradient colors={Gradients.purple} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-                style={styles.editBtn}>
-                <Text style={styles.editBtnText}>Edit Profile</Text>
-              </LinearGradient>
-            </Pressable>
-            <Pressable style={styles.shareBtn} hitSlop={4}>
-              <Ionicons name="share-social-outline" size={20} color="#fff" />
-            </Pressable>
-            <Pressable style={styles.shareBtn} hitSlop={4} onPress={() => router.push('/seller-dashboard')}>
-              <Ionicons name="storefront-outline" size={20} color="#fff" />
-            </Pressable>
+          <View style={styles.stats}>
+            {[
+              { label: 'Posts', value: displayProfile.posts_count },
+              { label: 'Followers', value: formatCount(displayProfile.followers_count) },
+              { label: 'Following', value: formatCount(displayProfile.following_count) },
+              { label: 'Sold', value: displayProfile.sold_count },
+            ].map(s => (
+              <View key={s.label} style={styles.stat}>
+                <Text style={styles.statValue}>{s.value}</Text>
+                <Text style={styles.statLabel}>{s.label}</Text>
+              </View>
+            ))}
           </View>
         </View>
 
-        {/* TAB BAR */}
-        <View style={styles.tabs}>
-          <Pressable style={[styles.tab, activeTab === 'posts' && styles.tabActive]} onPress={() => setActiveTab('posts')}>
-            <Ionicons name="grid-outline" size={22} color={activeTab === 'posts' ? Colors.pink : Colors.textMuted} />
+        {/* Bio */}
+        <View style={styles.bioSection}>
+          <Text style={styles.displayName}>{displayProfile.display_name || displayProfile.username}</Text>
+          {displayProfile.bio ? <Text style={styles.bio}>{displayProfile.bio}</Text> : null}
+          {displayProfile.country ? (
+            <View style={styles.locationRow}>
+              <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+              <Text style={styles.location}>{displayProfile.country}</Text>
+            </View>
+          ) : null}
+
+          {displayProfile.is_seller && (
+            <View style={styles.sellerBadgeRow}>
+              <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.sellerBadge}>
+                <Ionicons name="storefront-outline" size={13} color="#fff" />
+                <Text style={styles.sellerBadgeText}>Verified Seller</Text>
+              </LinearGradient>
+              <View style={styles.ratingPill}>
+                <Ionicons name="star" size={12} color={Colors.gold} />
+                <Text style={styles.ratingText}>{displayProfile.rating?.toFixed(1)}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionRow}>
+          <Pressable
+            style={styles.editBtn}
+            onPress={() => router.push('/menu')}
+          >
+            <Text style={styles.editBtnText}>Edit Profile</Text>
           </Pressable>
-          <Pressable style={[styles.tab, activeTab === 'saved' && styles.tabActive]} onPress={() => setActiveTab('saved')}>
-            <Ionicons name="bookmark-outline" size={22} color={activeTab === 'saved' ? Colors.pink : Colors.textMuted} />
+          {displayProfile.is_seller && (
+            <Pressable onPress={() => router.push('/seller-dashboard')} style={styles.dashBtn}>
+              <LinearGradient colors={Gradients.primary} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.dashBtnGrad}>
+                <Ionicons name="storefront-outline" size={15} color="#fff" />
+                <Text style={styles.dashBtnText}>Dashboard</Text>
+              </LinearGradient>
+            </Pressable>
+          )}
+          <Pressable onPress={() => router.push('/wallet')} style={styles.walletBtn} hitSlop={8}>
+            <Ionicons name="wallet-outline" size={20} color={Colors.pink} />
           </Pressable>
         </View>
 
-        {/* GRID */}
-        <View style={styles.grid}>
-          {PROFILE_POSTS.map(post => (
-            <Pressable key={post.id} style={styles.gridItem}
-              onPress={() => router.push({ pathname: '/post/[id]', params: { id: post.id } })}>
-              <Image source={{ uri: post.image }} style={styles.gridImg} contentFit="cover" />
-              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
-                <Text style={styles.gridPrice}>{post.price}</Text>
-                <View style={styles.gridLikes}>
-                  <Ionicons name="heart" size={10} color={Colors.pink} />
-                  <Text style={styles.gridLikesText}>{(post.likes / 1000).toFixed(1)}K</Text>
-                </View>
-              </LinearGradient>
-            </Pressable>
-          ))}
+        {/* Seller wallet preview */}
+        {displayProfile.is_seller && (
+          <Pressable onPress={() => router.push('/wallet')} style={styles.walletCard}>
+            <View style={styles.walletCardLeft}>
+              <Ionicons name="wallet" size={18} color={Colors.pink} />
+              <View>
+                <Text style={styles.walletCardLabel}>Wallet Balance</Text>
+                <Text style={styles.walletCardValue}>{sym}{(displayProfile.wallet_balance || 0).toLocaleString()}</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </Pressable>
+        )}
+
+        {/* Post grid tabs */}
+        <View style={styles.tabRow}>
+          <Pressable onPress={() => setActiveTab('posts')} style={[styles.tab, activeTab === 'posts' && styles.tabActive]}>
+            <Ionicons name="grid-outline" size={20} color={activeTab === 'posts' ? Colors.pink : Colors.textMuted} />
+          </Pressable>
+          <Pressable onPress={() => setActiveTab('saved')} style={[styles.tab, activeTab === 'saved' && styles.tabActive]}>
+            <Ionicons name="bookmark-outline" size={20} color={activeTab === 'saved' ? Colors.pink : Colors.textMuted} />
+          </Pressable>
         </View>
+
+        {/* Grid */}
+        {loading ? (
+          <ActivityIndicator color={Colors.pink} style={{ marginTop: 32 }} />
+        ) : (
+          <View style={styles.grid}>
+            {posts.map((post: any) => (
+              <Pressable
+                key={post.id}
+                style={styles.gridItem}
+                onPress={() => router.push(`/post/${post.id}`)}
+              >
+                <Image
+                  source={{ uri: post.image || post.media_urls?.[0] }}
+                  style={styles.gridImg}
+                  contentFit="cover"
+                />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.gridOverlay}>
+                  <Text style={styles.gridPrice}>{post.price || post.price_text || `${sym}${post.price_num}`}</Text>
+                  <View style={styles.gridLikes}>
+                    <Ionicons name="heart" size={11} color="#fff" />
+                    <Text style={styles.gridLikesText}>{formatCount(post.likes || post.likes_count || 0)}</Text>
+                  </View>
+                </LinearGradient>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <BottomTabBar />
@@ -148,63 +218,89 @@ export default function ProfileScreen() {
   );
 }
 
+function formatCount(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
+
+const GRID_SIZE = 3;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
+    paddingHorizontal: 16, paddingVertical: 14,
   },
-  username: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
-  cover: { height: 120, marginTop: -50 },
-  profileInfo: { paddingHorizontal: 16, marginTop: -60, gap: 10 },
-  avatarRow: { flexDirection: 'row' },
-  avatarWrap: {},
-  avatarRing: { width: 90, height: 90, borderRadius: 45, padding: 2.5 },
-  avatar: { width: '100%', height: '100%', borderRadius: 44 },
-  statsCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: 16,
-    borderWidth: 1, borderColor: Colors.border,
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  username: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
+  headerActions: { flexDirection: 'row', gap: 12 },
+  profileRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 20, marginBottom: 14 },
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 82, height: 82, borderRadius: 41, borderWidth: 2.5, borderColor: Colors.pink },
+  avatarFallback: { width: 82, height: 82, borderRadius: 41, alignItems: 'center', justifyContent: 'center' },
+  avatarFallbackText: { color: '#fff', fontSize: 32, fontWeight: Typography.black },
+  verifiedBadge: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: Colors.verified, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Colors.background,
   },
-  stat: { flex: 1, alignItems: 'center', gap: 2 },
-  statNum: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black },
-  statLabel: { color: Colors.textMuted, fontSize: Typography.xs, letterSpacing: 0.5 },
-  statDivider: { width: 1, height: 28, backgroundColor: Colors.border },
-  displayName: { color: '#fff', fontSize: Typography.xl, fontWeight: Typography.black, marginTop: 4 },
-  bio: { color: Colors.textSecondary, fontSize: Typography.base, lineHeight: 22 },
+  stats: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },
+  stat: { alignItems: 'center', gap: 3 },
+  statValue: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.black },
+  statLabel: { color: Colors.textMuted, fontSize: Typography.xs },
+  bioSection: { paddingHorizontal: 16, gap: 5, marginBottom: 14 },
+  displayName: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.bold },
+  bio: { color: Colors.textSecondary, fontSize: Typography.sm, lineHeight: 19 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { color: Colors.textMuted, fontSize: Typography.sm },
-  badges: { flexDirection: 'row', gap: 8 },
-  badge: {
-    borderRadius: Radius.pill, paddingHorizontal: 12, paddingVertical: 5,
-    borderWidth: 1.5, borderColor: Colors.pink,
+  location: { color: Colors.textMuted, fontSize: Typography.xs },
+  sellerBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  sellerBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: Radius.pill },
+  sellerBadgeText: { color: '#fff', fontSize: Typography.xs, fontWeight: Typography.bold },
+  ratingPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(255,215,0,0.1)', borderRadius: Radius.pill,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: 'rgba(255,215,0,0.3)',
   },
-  badgeGold: { borderColor: Colors.gold },
-  badgeBlue: { borderColor: Colors.verified },
-  badgeText: { color: Colors.pink, fontSize: Typography.xs, fontWeight: Typography.semibold },
-  ctaRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  editBtn: { borderRadius: Radius.pill, paddingVertical: 12, alignItems: 'center' },
-  editBtnText: { color: '#fff', fontSize: Typography.base, fontWeight: Typography.semibold },
-  shareBtn: {
-    width: 44, height: 44, borderRadius: 12, backgroundColor: Colors.surface,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  ratingText: { color: Colors.gold, fontSize: Typography.xs, fontWeight: Typography.bold },
+  actionRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 },
+  editBtn: {
+    flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.pill,
+    borderWidth: 1, borderColor: Colors.border, paddingVertical: 10, alignItems: 'center',
   },
-  tabs: {
-    flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1,
-    borderColor: Colors.border, marginTop: 16,
+  editBtnText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.semibold },
+  dashBtn: { flex: 1, borderRadius: Radius.pill, overflow: 'hidden' },
+  dashBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
+  dashBtnText: { color: '#fff', fontSize: Typography.sm, fontWeight: Typography.bold },
+  walletBtn: {
+    width: 44, height: 44, backgroundColor: Colors.surface, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: Colors.pink,
   },
-  tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
+  walletCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 16, marginBottom: 12,
+    backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(255,77,166,0.3)',
+  },
+  walletCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  walletCardLabel: { color: Colors.textMuted, fontSize: Typography.xs },
+  walletCardValue: { color: '#fff', fontSize: Typography.lg, fontWeight: Typography.black },
+  tabRow: {
+    flexDirection: 'row', borderTopWidth: 1, borderTopColor: Colors.border,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    marginBottom: 1,
+  },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 13 },
   tabActive: { borderBottomWidth: 2, borderBottomColor: Colors.pink },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  gridItem: { width: GRID_ITEM, height: GRID_ITEM, position: 'relative', overflow: 'hidden' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  gridItem: { width: '33.33%', aspectRatio: 1, position: 'relative' },
   gridImg: { width: '100%', height: '100%' },
   gridOverlay: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 6, paddingVertical: 6,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%',
+    justifyContent: 'flex-end', padding: 6,
   },
-  gridPrice: { color: '#fff', fontSize: 11, fontWeight: Typography.bold },
-  gridLikes: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  gridLikesText: { color: '#fff', fontSize: 9 },
+  gridPrice: { color: '#fff', fontSize: Typography.xs, fontWeight: Typography.black },
+  gridLikes: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  gridLikesText: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
 });
