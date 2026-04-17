@@ -9,7 +9,8 @@ export const PostService = {
     page?: number;
     pageSize?: number;
   } = {}): Promise<DbPost[]> {
-    const { category, userCountry, page = 0, pageSize = 10 } = options;
+    const { category, page = 0, pageSize = 20 } = options;
+
     let query = supabase
       .from('posts')
       .select('*, user_profiles(*)')
@@ -22,11 +23,14 @@ export const PostService = {
     }
 
     const { data, error } = await query;
-    if (error) { console.error('PostService.getFeed:', error.message); return []; }
+    if (error) {
+      console.error('PostService.getFeed:', error.message);
+      return [];
+    }
     return (data || []) as DbPost[];
   },
 
-  // Get single post
+  // Get single post with author
   async getById(postId: string): Promise<DbPost | null> {
     const { data, error } = await supabase
       .from('posts')
@@ -49,25 +53,37 @@ export const PostService = {
     return (data || []) as DbPost[];
   },
 
-  // Create post
+  // Create post (media URLs already uploaded to Cloudinary)
   async create(post: Partial<DbPost>): Promise<DbPost | null> {
     const { data, error } = await supabase
       .from('posts')
       .insert(post)
       .select()
       .single();
-    if (error) { console.error('PostService.create:', error.message); return null; }
+    if (error) {
+      console.error('PostService.create:', error.message);
+      return null;
+    }
+
     // Increment user posts_count
     if (post.user_id) {
-      await supabase
+      const { data: profile } = await supabase
         .from('user_profiles')
-        .update({ posts_count: supabase.rpc as any })
-        .eq('id', post.user_id);
+        .select('posts_count')
+        .eq('id', post.user_id)
+        .single();
+      if (profile) {
+        await supabase
+          .from('user_profiles')
+          .update({ posts_count: ((profile as any).posts_count || 0) + 1 })
+          .eq('id', post.user_id);
+      }
     }
+
     return data as DbPost;
   },
 
-  // Delete post
+  // Soft-delete (deactivate) post
   async delete(postId: string, userId: string): Promise<boolean> {
     const { error } = await supabase
       .from('posts')
@@ -77,7 +93,7 @@ export const PostService = {
     return !error;
   },
 
-  // Search posts
+  // Full-text search across title, description, category
   async search(query: string): Promise<DbPost[]> {
     const { data, error } = await supabase
       .from('posts')
@@ -101,59 +117,55 @@ export const PostService = {
     return (data || []) as DbPost[];
   },
 
-  // Like / unlike post
+  // Toggle like — returns current liked state and new count
   async toggleLike(postId: string, userId: string): Promise<{ liked: boolean; count: number }> {
-    // Check existing
     const { data: existing } = await supabase
       .from('post_likes')
       .select('id')
       .eq('post_id', postId)
       .eq('user_id', userId)
+      .maybeSingle();
+
+    const { data: curr } = await supabase
+      .from('posts')
+      .select('likes_count')
+      .eq('id', postId)
       .single();
 
+    const currentCount = (curr as any)?.likes_count || 0;
+
     if (existing) {
-      // Unlike
       await supabase.from('post_likes').delete().eq('post_id', postId).eq('user_id', userId);
-      const { data: post } = await supabase
-        .from('posts')
-        .update({ likes_count: supabase.rpc as any })
-        .eq('id', postId)
-        .select('likes_count')
-        .single();
-      // decrement manually
-      const { data: curr } = await supabase.from('posts').select('likes_count').eq('id', postId).single();
-      const newCount = Math.max(0, ((curr as any)?.likes_count || 1) - 1);
+      const newCount = Math.max(0, currentCount - 1);
       await supabase.from('posts').update({ likes_count: newCount }).eq('id', postId);
       return { liked: false, count: newCount };
     } else {
-      // Like
       await supabase.from('post_likes').insert({ post_id: postId, user_id: userId });
-      const { data: curr } = await supabase.from('posts').select('likes_count').eq('id', postId).single();
-      const newCount = ((curr as any)?.likes_count || 0) + 1;
+      const newCount = currentCount + 1;
       await supabase.from('posts').update({ likes_count: newCount }).eq('id', postId);
       return { liked: true, count: newCount };
     }
   },
 
-  // Check if liked
+  // Check if a post is liked by user
   async isLiked(postId: string, userId: string): Promise<boolean> {
     const { data } = await supabase
       .from('post_likes')
       .select('id')
       .eq('post_id', postId)
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     return !!data;
   },
 
-  // Save / unsave
+  // Toggle save
   async toggleSave(postId: string, userId: string): Promise<boolean> {
     const { data: existing } = await supabase
       .from('post_saves')
       .select('id')
       .eq('post_id', postId)
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       await supabase.from('post_saves').delete().eq('post_id', postId).eq('user_id', userId);
@@ -164,15 +176,22 @@ export const PostService = {
     }
   },
 
-  // Record view
+  // Record a post view
   async recordView(postId: string, userId?: string): Promise<void> {
     await supabase.from('post_views').insert({
       post_id: postId,
       user_id: userId || null,
     });
+    // Increment view counter
+    const { data } = await supabase.from('posts').select('views_count').eq('id', postId).single();
+    if (data) {
+      await supabase.from('posts')
+        .update({ views_count: ((data as any).views_count || 0) + 1 })
+        .eq('id', postId);
+    }
   },
 
-  // Get Shorts (video posts)
+  // Get Shorts (video posts) sorted by engagement
   async getShorts(): Promise<DbPost[]> {
     const { data, error } = await supabase
       .from('posts')
