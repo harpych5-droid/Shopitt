@@ -78,9 +78,9 @@ function buildFallbackPost(p: any, currency: Currency) {
     },
     media_urls: p.media_urls ?? [p.image],
     price_text: p.price_text ?? p.price,
-    price_num: p.price_num ?? parseInt((p.price || '0').replace(/[^0-9]/g, '')) || 0,
-    likes_count: p.likes_count ?? p.likes ?? 0,
-    comments_count: p.comments_count ?? p.comments ?? 0,
+    price_num: p.price_num != null ? p.price_num : (parseInt((p.price || '0').replace(/[^0-9]/g, '')) || 0),
+    likes_count: p.likes_count != null ? p.likes_count : (p.likes != null ? p.likes : 0),
+    comments_count: p.comments_count != null ? p.comments_count : (p.comments != null ? p.comments : 0),
   };
 }
 
